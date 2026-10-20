@@ -1,0 +1,1827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global CO₂ Emissions, 1750–2021</title>
+<meta name="description" content="Interactive dashboard of global CO₂ emissions from 1750 to 2021: choropleth maps, country rankings, a top-20 bar chart race, continent trends and a cartogram.">
+<meta property="og:title" content="Global CO₂ Emissions, 1750–2021">
+<meta property="og:description" content="Interactive maps, rankings and an animated top-20 chart of CO₂ emissions by country.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%231f5fbf'/%3E%3Cpath d='M5 13h22M4 19h24M16 2c-5 6-5 22 0 28M16 2c5 6 5 22 0 28' stroke='%23fff' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+/* Design tokens the dashboard uses (light first, dark below) */
+:root {
+  color-scheme: light;
+  --font-anthropic-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-anthropic-serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --cds-font-size-caption: 0.8125rem;
+  --cds-font-size-body: 0.9375rem;
+  --cds-font-size-heading: 1.0625rem;
+  --cds-font-size-title: 1.625rem;
+  --cds-font-weight-medium: 500;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 12px; --cds-gap-lg: 20px; --cds-gap-xl: 32px;
+  --cds-pad-xs: 6px; --cds-pad-sm: 10px; --cds-pad-md: 14px; --cds-pad-lg: 20px; --cds-pad-xl: 32px;
+  --cds-radius: 10px;
+  --cds-dur-slow: 320ms;
+  --color-bg: #f2f5fa;
+  --color-panel: #ffffff;
+  --color-fg: #0f1b2d;
+  --color-fg-muted: #586a82;
+  --color-border-line: #dce3ed;
+  --color-ok: #15803d;
+  --color-bad: #c2410c;
+  --cds-chart-grid: #e8edf4;
+  --cds-chart-axis: #b6c2d3;
+  --cds-chart-reference: #7a8aa3;
+  --cds-surface-popover: #ffffff;
+  --cds-border: #d3dbe7;
+  --cds-shadow-popover: 0 6px 24px rgba(15, 27, 45, 0.14);
+  --cds-text-secondary: #586a82;
+  --skeleton: #e4eaf3;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-bg: #0a111e;
+    --color-panel: #111a2b;
+    --color-fg: #e6ecf6;
+    --color-fg-muted: #93a3bb;
+    --color-border-line: #233049;
+    --color-ok: #4ade80;
+    --color-bad: #fb923c;
+    --cds-chart-grid: #1c283e;
+    --cds-chart-axis: #3a4a66;
+    --cds-chart-reference: #8da0bf;
+    --cds-surface-popover: #16213a;
+    --cds-border: #2c3a55;
+    --cds-shadow-popover: 0 8px 28px rgba(0, 0, 0, 0.5);
+    --cds-text-secondary: #93a3bb;
+    --skeleton: #1b2640;
+  }
+}
+html { -webkit-text-size-adjust: 100%; }
+[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-anthropic-sans);
+  padding-block: 24px 32px;
+  padding-left: max(clamp(16px, 3vw, 40px), env(safe-area-inset-left, 0px));
+  padding-right: max(clamp(16px, 3vw, 40px), env(safe-area-inset-right, 0px));
+}
+.dash-skeleton { color: transparent !important; background: var(--skeleton); border-radius: 6px; }
+span.dash-skeleton { display: inline-block; min-width: 2.5ch; }
+.co2-hero .dash-skeleton { background: rgba(255, 255, 255, 0.16); }
+@media (prefers-reduced-motion: no-preference) {
+  .dash-skeleton { animation: skel 1.4s ease-in-out infinite; }
+  @keyframes skel { 50% { opacity: 0.55; } }
+}
+.site-note { max-width: 1240px; margin: 0 auto 16px; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--color-border-line); background: var(--color-panel); font-size: 0.875rem; }
+.site-note code { font-size: 0.85em; }
+.site-foot { max-width: 1240px; margin: 28px auto 0; font-size: 0.8125rem; color: var(--color-fg-muted); line-height: 1.5; }
+.site-foot a { color: inherit; }
+</style>
+<script src="lib/d3.min.js"></script>
+<script>
+/* A small stand-in for the dashboard runtime: loads the data files and feeds them to the page. */
+window.dash = (() => {
+  const SOURCES = {
+    country_emissions: { url: 'data/country_emissions.csv', type: 'csv' },
+    continent_emissions: { url: 'data/continent_emissions.csv', type: 'csv' },
+    country_shapes: { url: 'data/country_shapes.json', type: 'json' },
+    country_continents: { url: 'data/country_continents.csv', type: 'csv' },
+  };
+  const store = {};
+  const calcs = {};
+  const listeners = [];
+  for (const id of Object.keys(SOURCES)) store[id] = { status: 'loading', data: [] };
+  function calcData(id) {
+    const c = calcs[id];
+    const ins = c.inputs.map((i) => data(i));
+    if (ins.some((s) => s.status === 'error')) return { status: 'error', data: [] };
+    if (!ins.every((s) => s.status === 'ok')) return { status: 'loading', data: [] };
+    const key = ins.map((s) => s.data);
+    if (!c.out || c.key.some((k, i) => k !== key[i])) {
+      try { c.out = { status: 'ok', data: c.fn(...key) }; }
+      catch (e) { console.error(e); c.out = { status: 'error', data: [], message: String(e) }; }
+      c.key = key;
+    }
+    return c.out;
+  }
+  function data(id) {
+    if (store[id]) return store[id];
+    if (calcs[id]) return calcData(id);
+    return { status: 'missing', data: [] };
+  }
+  function emit() {
+    for (const fn of listeners) {
+      try { fn(); } catch (e) { console.error(e); }
+    }
+  }
+  function showLocalHint() {
+    if (location.protocol !== 'file:' || document.querySelector('.site-note')) return;
+    const n = document.createElement('div');
+    n.className = 'site-note';
+    n.innerHTML = 'Your browser blocks data files opened straight from disk. In this folder run <code>python -m http.server</code>, then open <code>http://localhost:8000</code>. On GitHub Pages it works as is.';
+    document.body.prepend(n);
+  }
+  async function load(id) {
+    const s = SOURCES[id];
+    try {
+      const res = await fetch(s.url);
+      if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+      const rows = s.type === 'csv' ? d3.csvParse(await res.text()) : await res.json();
+      store[id] = { status: 'ok', data: rows, columns: rows.columns || Object.keys(rows[0] || {}) };
+    } catch (e) {
+      console.error('Could not load ' + s.url, e);
+      store[id] = { status: 'error', data: [], message: String(e) };
+      showLocalHint();
+    }
+    emit();
+  }
+  let lastW = 0, raf = 0;
+  function watchWidth() {
+    const rootEl = document.getElementById('dash-root');
+    if (!rootEl || !window.ResizeObserver) return;
+    lastW = rootEl.clientWidth;
+    new ResizeObserver(() => {
+      const w = rootEl.clientWidth;
+      if (w === lastW) return;
+      lastW = w;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(emit);
+    }).observe(rootEl);
+  }
+  document.addEventListener('DOMContentLoaded', watchWidth);
+  Object.keys(SOURCES).forEach(load);
+  return {
+    data,
+    calc(id, def) { calcs[id] = def; },
+    onData(fn) { listeners.push(fn); try { fn(); } catch (e) { console.error(e); } },
+    setLink(name) { try { history.replaceState(null, '', '#' + name); } catch (e) { /* ignore */ } },
+    loader() {}, refresh() {}, params: () => ({}), setParams() {}, resetParams() {}, colors: [],
+  };
+})();
+</script>
+</head>
+<body>
+<main id="dash-root">
+<style>
+/* Layout: one centred column — navy summary band, then four full-width chart cards (two maps, continent lines, cartogram). */
+.co2 {
+  --co2-accent: #1f5fbf;
+  --co2-accent-soft: rgba(31, 95, 191, 0.14);
+  --co2-nd-bg: #eceef2;
+  --co2-nd-line: #c9ced8;
+  --co2-land: #e6ebf2;
+  --co2-pick: #d97706;
+  --co2-pick-soft: rgba(217, 119, 6, 0.12);
+  max-width: 1240px;
+  margin-inline: auto;
+  display: grid;
+  gap: var(--cds-gap-lg);
+  font-family: var(--font-anthropic-sans);
+  font-size: var(--cds-font-size-body);
+  color: var(--color-fg);
+}
+.co2 *, .co2 *::before, .co2 *::after { box-sizing: border-box; }
+.co2 button { font: inherit; }
+.co2 [hidden] { display: none !important; }
+.co2 button:focus-visible, .co2 input:focus-visible { outline: 2px solid var(--co2-accent); outline-offset: 2px; }
+
+/* Summary band */
+.co2-hero {
+  display: grid;
+  gap: var(--cds-gap-md);
+  padding: var(--cds-pad-xl) var(--cds-pad-lg);
+  border-radius: var(--cds-radius);
+  color: #ffffff;
+  background:
+    radial-gradient(120% 140% at 100% 0%, rgba(58, 128, 228, 0.55) 0%, rgba(58, 128, 228, 0) 55%),
+    linear-gradient(140deg, #071634 0%, #0d2c69 52%, #15489e 100%);
+}
+.co2-eyebrow { margin: 0; font-size: var(--cds-font-size-caption); letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.72); }
+.co2-h1 { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: calc(var(--cds-font-size-title) * 1.45); line-height: 1.1; color: #ffffff; text-wrap: balance; }
+.co2-take { margin: 0; max-width: 62ch; font-size: var(--cds-font-size-heading); line-height: 1.45; color: rgba(255, 255, 255, 0.9); }
+.co2-take .co2-em { color: #ffffff; font-weight: 600; }
+.co2-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--cds-gap-sm); }
+.co2-kpi { min-width: 0; display: grid; align-content: start; gap: 2px; padding: var(--cds-pad-sm) var(--cds-pad-md); border-radius: var(--cds-radius); background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.14); }
+.co2-kpi-l { font-size: var(--cds-font-size-caption); color: rgba(255, 255, 255, 0.7); }
+.co2-kpi-v { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); line-height: 1.15; color: #ffffff; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.co2-kpi-s { font-size: var(--cds-font-size-caption); color: rgba(255, 255, 255, 0.78); font-variant-numeric: tabular-nums; }
+.co2-jump { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); }
+.co2-jump button { cursor: pointer; font-size: var(--cds-font-size-caption); color: #ffffff; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.24); border-radius: 999px; padding: 4px 12px; }
+.co2-jump button:hover { background: rgba(255, 255, 255, 0.2); }
+.co2-jump button:focus-visible { outline-color: #9cc3ff; }
+
+/* Cards */
+.co2-card { min-width: 0; display: grid; gap: var(--cds-gap-md); padding: var(--cds-pad-lg); background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+.co2-h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); text-wrap: balance; }
+.co2-note { margin: 4px 0 0; max-width: 78ch; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.45; }
+
+/* Year controls */
+.co2-ctrl { display: flex; align-items: center; gap: var(--cds-gap-sm); min-width: 0; }
+.co2-ctrl.is-off { opacity: 0.45; }
+.co2-play { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer; color: #ffffff; background: var(--co2-accent); }
+.co2-play svg { width: 14px; height: 14px; fill: currentColor; }
+.co2-year { flex: none; min-width: 4ch; font-family: var(--font-anthropic-serif); font-size: var(--cds-font-size-title); line-height: 1; font-variant-numeric: tabular-nums; color: var(--color-fg); }
+.co2-step { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; cursor: pointer; border-radius: 50%; border: 1px solid var(--color-border-line); background: transparent; color: var(--color-fg); }
+.co2-step svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.co2-range { flex: 1 1 auto; min-width: 0; width: 100%; height: 28px; margin: 0; cursor: pointer; accent-color: var(--co2-accent); }
+.co2 button:disabled, .co2 input:disabled { cursor: default; }
+.co2-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm) var(--cds-gap-md); }
+.co2-seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--color-border-line); border-radius: 999px; }
+.co2-seg button { cursor: pointer; border: 0; border-radius: 999px; padding: 4px 12px; font-size: var(--cds-font-size-caption); background: transparent; color: var(--color-fg); }
+.co2-seg button[aria-pressed="true"] { background: var(--co2-accent); color: #ffffff; }
+.co2-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); cursor: pointer; }
+.co2-check input { accent-color: var(--co2-accent); margin: 0; }
+
+/* Charts */
+.co2-chart { position: relative; min-width: 0; width: 100%; }
+.co2-map, .co2-carto { aspect-ratio: 2.25 / 1; }
+.co2-line { min-height: 300px; }
+.co2-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.co2-svg text { font-family: var(--font-anthropic-sans); font-size: var(--cds-font-size-caption); fill: var(--color-fg-muted); }
+.co2-country { stroke: var(--color-panel); stroke-width: 0.5; vector-effect: non-scaling-stroke; }
+.co2-country.is-hover { stroke: var(--color-fg); stroke-width: 1.6; }
+.co2-land { fill: var(--co2-land); stroke: none; }
+.co2-bubble { stroke: var(--color-panel); stroke-width: 0.8; vector-effect: non-scaling-stroke; }
+.co2-bubble.is-hover { stroke: var(--color-fg); stroke-width: 2; }
+.co2-country.is-picked { stroke: var(--co2-pick); stroke-width: 2.4; }
+.co2-bubble.is-picked { stroke: var(--co2-pick); stroke-width: 2.6; }
+.co2-blabel { pointer-events: none; text-anchor: middle; dominant-baseline: central; font-weight: 500; }
+.co2-grid line { stroke: var(--cds-chart-grid); }
+.co2-axis .domain, .co2-axis line { stroke: var(--cds-chart-axis); }
+.co2-unit { font-weight: 500; }
+.co2-endname { fill: var(--color-fg); font-weight: 500; }
+.co2-rule { stroke: var(--cds-chart-reference); stroke-dasharray: 3 3; }
+.co2-hdot { stroke: var(--color-panel); stroke-width: 2; }
+.co2-ctx-bg { fill: var(--co2-accent-soft); opacity: 0.35; }
+.co2-ctx-area { fill: var(--co2-accent-soft); stroke: var(--co2-accent); stroke-width: 1; }
+.co2-shade { fill: var(--color-panel); opacity: 0.7; }
+.co2-brush .selection { fill: none; stroke: var(--co2-accent); stroke-width: 1.5; }
+.co2-grip { fill: var(--color-panel); stroke: var(--co2-accent); stroke-width: 1.5; }
+.co2-griptick { stroke: var(--co2-accent); stroke-width: 1.2; }
+
+/* Tooltip */
+.co2-tip { position: absolute; left: 0; top: 0; z-index: 5; pointer-events: none; display: grid; gap: 2px; min-width: 11rem; max-width: 17rem; padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); color: var(--color-fg); background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); }
+.co2-tip-h { margin-bottom: 2px; color: var(--cds-text-secondary); }
+.co2-tip-r { display: flex; align-items: center; gap: 6px; }
+.co2-tip-l { flex: 1 1 auto; color: var(--color-fg-muted); }
+.co2-tip-v { color: var(--color-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.co2-tip-r.is-strong .co2-tip-v, .co2-tip-r.is-strong .co2-tip-l { color: var(--color-fg); font-weight: 600; }
+.co2-sw { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+
+/* Legends */
+.co2-legend { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--cds-gap-md) var(--cds-gap-lg); min-height: 2.5rem; }
+.co2-leg { flex: 0 1 24rem; min-width: 0; width: 100%; display: grid; gap: 4px; }
+.co2-leg-cap { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.co2-leg-bar { height: 10px; border-radius: 3px; }
+.co2-leg-ticks { position: relative; height: 1.3em; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.co2-leg-ticks span { position: absolute; top: 0; white-space: nowrap; transform: translateX(-50%); }
+.co2-leg-ticks span.is-first { transform: none; }
+.co2-leg-ticks span.is-last { transform: translateX(-100%); }
+.co2-leg-item { display: inline-flex; align-items: center; gap: 6px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.co2-nd-sw { width: 18px; height: 10px; border-radius: 2px; background: repeating-linear-gradient(45deg, var(--co2-nd-line) 0 1.5px, var(--co2-nd-bg) 1.5px 4px); }
+.co2-sizeleg circle { fill: none; stroke: var(--color-fg-muted); }
+.co2-sizeleg line { stroke: var(--color-fg-muted); stroke-dasharray: 2 2; }
+
+/* Continent chips and range presets */
+.co2-chips { display: flex; flex-wrap: wrap; gap: var(--cds-gap-xs); }
+.co2-chip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 3px 10px; font-size: var(--cds-font-size-caption); color: var(--color-fg); background: transparent; border: 1px solid var(--color-border-line); border-radius: 999px; }
+.co2-chip[aria-pressed="false"] { color: var(--color-fg-muted); }
+.co2-chip[aria-pressed="false"] .co2-sw { opacity: 0.3; }
+.co2-preset[aria-pressed="true"] { background: var(--co2-accent-soft); border-color: var(--co2-accent); }
+.co2-rangebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--cds-gap-sm); }
+.co2-rangeout { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.co2-rangeout b { color: var(--color-fg); font-weight: 600; }
+
+/* States */
+.co2-fail { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.co2-fail-dot { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); }
+.co2 [data-dash-source-state=empty] { color: transparent; }
+.co2 [data-dash-source-state=refreshing] { opacity: 0.5; transition: opacity var(--cds-dur-slow); }
+
+/* Country table */
+.co2-filters { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--cds-gap-sm) var(--cds-gap-md); }
+.co2-search { flex: 1 1 14rem; min-width: 0; max-width: 22rem; height: 32px; padding: 0 10px; font: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg); background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+.co2-pickpill { border-color: var(--co2-pick); }
+.co2-pickpill .co2-sw { background: var(--co2-pick); }
+.co2-tablebox { position: relative; min-height: 12rem; max-height: 32rem; overflow: auto; border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+.co2-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.co2-table th { position: sticky; top: 0; z-index: 1; padding: 0; text-align: left; font-weight: var(--cds-font-weight-medium); background: var(--color-panel); box-shadow: inset 0 -1px 0 var(--color-border-line); }
+.co2-table th button { width: 100%; display: flex; align-items: center; gap: 4px; padding: 8px 10px; border: 0; cursor: pointer; white-space: nowrap; font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); background: transparent; }
+.co2-table th.num button { justify-content: flex-end; }
+.co2-table th[aria-sort] button { color: var(--color-fg); }
+.co2-table th button::after { content: ""; display: inline-block; width: 0.9em; text-align: center; }
+.co2-table th[aria-sort="ascending"] button::after { content: "↑"; }
+.co2-table th[aria-sort="descending"] button::after { content: "↓"; }
+.co2-table td { padding: 6px 10px; border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.co2-table td.num { text-align: right; }
+.co2-table tbody tr { cursor: pointer; }
+.co2-table tbody tr:hover { background: var(--co2-accent-soft); }
+.co2-table tbody tr.is-picked { background: var(--co2-pick-soft); box-shadow: inset 3px 0 0 var(--co2-pick); }
+.co2-table tbody tr:focus-visible { outline: 2px solid var(--co2-accent); outline-offset: -2px; }
+.co2-table .co2-rankcell { width: 4em; color: var(--color-fg-muted); }
+.co2-cellbar { display: block; height: 3px; margin-top: 3px; margin-left: auto; border-radius: 2px; background: var(--co2-accent); opacity: 0.6; }
+.co2-up { color: var(--color-bad); }
+.co2-down { color: var(--color-ok); }
+.co2-tablefoot { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+
+/* Top-20 bar chart race */
+.co2-race { min-height: 420px; }
+.co2-race .co2-axis line { stroke: var(--cds-chart-grid); }
+.co2-race .co2-axis .domain { display: none; }
+.co2-rbar rect { cursor: pointer; }
+.co2-rbar.is-picked rect { stroke: var(--co2-pick); stroke-width: 2.5; }
+.co2-svg .co2-rname { fill: var(--color-fg); text-anchor: end; }
+.co2-rbar.is-picked .co2-rname { font-weight: 600; }
+.co2-svg .co2-rval { font-variant-numeric: tabular-nums; }
+.co2-svg .co2-watermark { font-family: var(--font-anthropic-serif); fill: var(--color-fg); opacity: 0.13; text-anchor: end; }
+.co2-svg .co2-race-sum { text-anchor: end; }
+.co2-contkey { display: flex; flex-wrap: wrap; gap: 4px 14px; min-width: 0; }
+.co2-select { height: 30px; padding: 0 8px; font: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg); background: var(--color-bg); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+
+.co2-foot { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); line-height: 1.45; max-width: 90ch; }
+
+@media (max-width: 560px) {
+  .co2-hero { padding: var(--cds-pad-lg) var(--cds-pad-md); }
+  .co2-card { padding: var(--cds-pad-md); }
+  .co2-h1 { font-size: var(--cds-font-size-title); }
+  .co2-step { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .co2-country { transition: fill 120ms linear; }
+}
+</style>
+
+<div class="co2" id="co2">
+  <header class="co2-hero" id="overview">
+    <p class="co2-eyebrow">CO₂ from fossil fuels and industry · excludes land-use change</p>
+    <h1 class="co2-h1">Global CO₂ emissions</h1>
+    <p class="co2-take" id="takeaway"><span class="co2-em dash-skeleton" data-source="headline" data-field="lead_continent" data-row="0">—</span> produced <span class="co2-em dash-skeleton" data-source="headline" data-field="lead_share_pct" data-row="0">—</span>% of the six continents' CO₂ in <span class="co2-em dash-skeleton" data-source="headline" data-field="year" data-row="0">—</span>.</p>
+    <div class="co2-kpis" id="headline-figures">
+      <div class="co2-kpi">
+        <span class="co2-kpi-l">Six continents, <span class="dash-skeleton" data-source="headline" data-field="year" data-row="0">—</span></span>
+        <span class="co2-kpi-v"><span class="dash-skeleton" data-source="headline" data-field="total_gt" data-row="0">—</span> Gt</span>
+        <span class="co2-kpi-s">billion tonnes of CO₂</span>
+      </div>
+      <div class="co2-kpi">
+        <span class="co2-kpi-l">Largest emitting country</span>
+        <span class="co2-kpi-v dash-skeleton" data-source="headline" data-field="top_country" data-row="0">—</span>
+        <span class="co2-kpi-s"><span class="dash-skeleton" data-source="headline" data-field="top_country_gt" data-row="0">—</span> Gt that year</span>
+      </div>
+      <div class="co2-kpi">
+        <span class="co2-kpi-l">Most CO₂ per person</span>
+        <span class="co2-kpi-v dash-skeleton" data-source="headline" data-field="top_pc_country" data-row="0">—</span>
+        <span class="co2-kpi-s"><span class="dash-skeleton" data-source="headline" data-field="top_pc_t" data-row="0">—</span> t per person</span>
+      </div>
+      <div class="co2-kpi">
+        <span class="co2-kpi-l">Years covered</span>
+        <span class="co2-kpi-v"><span class="dash-skeleton" data-source="headline" data-field="first_year" data-row="0">—</span>–<span class="dash-skeleton" data-source="headline" data-field="year" data-row="0">—</span></span>
+        <span class="co2-kpi-s">one row per country per year</span>
+      </div>
+    </div>
+    <nav class="co2-jump" aria-label="Jump to a chart">
+      <button type="button" data-go="annual-map">Annual emissions map</button>
+      <button type="button" data-go="per-capita-map">Per person map</button>
+      <button type="button" data-go="country-table">Country rankings</button>
+      <button type="button" data-go="top-20">Top 20 over time</button>
+      <button type="button" data-go="continents">By continent</button>
+      <button type="button" data-go="cartogram">Cartogram</button>
+    </nav>
+  </header>
+
+  <section class="co2-card" id="annual-map" aria-labelledby="annual-map-title">
+    <div>
+      <h2 class="co2-h2" id="annual-map-title">Annual CO₂ emissions by country</h2>
+      <p class="co2-note">Million tonnes (Mt) per year. Drag the slider or press play to move through the years, and hover a country to see its figures.</p>
+    </div>
+    <div class="co2-ctrl" id="annual-ctrl"></div>
+    <div class="co2-chart co2-map dash-skeleton" id="annual-map-chart" data-source="country_emissions country_shapes"></div>
+    <div class="co2-legend" id="annual-legend" data-source="country_emissions"></div>
+  </section>
+
+  <section class="co2-card" id="per-capita-map" aria-labelledby="per-capita-map-title">
+    <div>
+      <h2 class="co2-h2" id="per-capita-map-title">CO₂ emissions per person</h2>
+      <p class="co2-note">Tonnes of CO₂ per person per year: a country's annual emissions divided by its population. Small, oil-rich states lead this ranking.</p>
+    </div>
+    <div class="co2-ctrl" id="pc-ctrl"></div>
+    <div class="co2-chart co2-map dash-skeleton" id="pc-map-chart" data-source="country_emissions country_shapes"></div>
+    <div class="co2-legend" id="pc-legend" data-source="country_emissions"></div>
+  </section>
+
+  <section class="co2-card" id="country-table" aria-labelledby="country-table-title">
+    <div>
+      <h2 class="co2-h2" id="country-table-title">Country rankings</h2>
+      <p class="co2-note">Every country's figures for the chosen year. Click a column heading to sort, search by name, and click a row (or a country on either map) to highlight it across the dashboard.</p>
+    </div>
+    <div class="co2-ctrl" id="table-ctrl"></div>
+    <div class="co2-toolbar">
+      <div class="co2-filters">
+        <input type="search" class="co2-search" id="table-search" placeholder="Search countries" aria-label="Search countries" autocomplete="off">
+        <label class="co2-check" for="table-bigonly"><input type="checkbox" id="table-bigonly" checked> Only countries with 1 million+ people</label>
+      </div>
+      <button type="button" class="co2-chip co2-pickpill" id="table-picked" aria-label="Clear highlight" hidden></button>
+    </div>
+    <div class="co2-tablebox dash-skeleton" id="table-box">
+      <table class="co2-table" id="country-table-grid" data-source="country_emissions" data-row-key="iso_code,year">
+        <thead>
+          <tr>
+            <th data-source="country_ranks" data-field="rank" data-sort="rank"><button type="button">Rank</button></th>
+            <th data-field="country" data-sort="country"><button type="button">Country</button></th>
+            <th class="num" data-field="co2" data-sort="co2"><button type="button">Annual CO₂ (Mt)</button></th>
+            <th class="num" data-field="share_global_co2" data-sort="share"><button type="button">Share of world</button></th>
+            <th class="num" data-field="co2_per_capita" data-sort="pc"><button type="button">Per person (t)</button></th>
+            <th class="num" data-source="country_ranks" data-field="change_10y_pct" data-sort="chg"><button type="button">10-year change</button></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="co2-tablefoot" id="table-count" data-source="country_emissions">—</p>
+  </section>
+
+  <section class="co2-card" id="top-20" aria-labelledby="top-20-title">
+    <div>
+      <h2 class="co2-h2" id="top-20-title">Top 20 countries by share of world emissions</h2>
+      <p class="co2-note">Each bar is one country's share of the world's CO₂ that year. Press play and the bars slide past each other as countries overtake one another; a country that drops out of the top 20 slides off the bottom and a newcomer slides in. Colour shows the continent.</p>
+    </div>
+    <div class="co2-ctrl" id="race-ctrl"></div>
+    <div class="co2-toolbar">
+      <div class="co2-contkey" id="race-key" data-source="country_continents"></div>
+      <label class="co2-check" for="race-speed">Speed <select class="co2-select" id="race-speed"></select></label>
+    </div>
+    <div class="co2-chart co2-race dash-skeleton" id="race-chart" data-source="country_emissions country_continents"></div>
+  </section>
+
+  <section class="co2-card" id="continents" aria-labelledby="continents-title">
+    <div>
+      <h2 class="co2-h2" id="continents-title">Total emissions by continent</h2>
+      <p class="co2-note">Annual CO₂ for each continent. Drag the shaded window in the strip under the chart, or pull its edges, to choose the years. Click a continent to hide or show it.</p>
+    </div>
+    <div class="co2-chips" id="cont-legend" data-source="continent_emissions"></div>
+    <div class="co2-chart co2-line dash-skeleton" id="cont-chart" data-source="continent_emissions"></div>
+    <div class="co2-rangebar">
+      <div class="co2-chips" id="cont-presets" aria-label="Year range presets"></div>
+      <output class="co2-rangeout" id="cont-range" data-source="continent_emissions">—</output>
+    </div>
+  </section>
+
+  <section class="co2-card" id="cartogram" aria-labelledby="cartogram-title">
+    <div>
+      <h2 class="co2-h2" id="cartogram-title">Emissions cartogram</h2>
+      <p class="co2-note">Each circle is a country, sized by its CO₂ and placed as close to its real location as the circles allow. Show a single year, or every year from the first to the last added together.</p>
+    </div>
+    <div class="co2-toolbar">
+      <div class="co2-seg" role="group" aria-label="Cartogram period">
+        <button type="button" id="carto-mode-year" aria-pressed="true">Single year</button>
+        <button type="button" id="carto-mode-all" aria-pressed="false">All years combined</button>
+      </div>
+      <label class="co2-check" for="carto-rescale"><input type="checkbox" id="carto-rescale"> Rescale circles to each year</label>
+    </div>
+    <div class="co2-ctrl" id="carto-ctrl"></div>
+    <div class="co2-chart co2-carto dash-skeleton" id="carto-chart" data-source="country_emissions country_shapes"></div>
+    <div class="co2-legend" id="carto-legend" data-source="country_emissions"></div>
+  </section>
+
+  <ul class="co2-foot" id="notes">
+    <li>Emissions are annual CO₂ from fossil fuels and industry, excluding land-use change, as recorded in your file. 1 Gt (billion tonnes) = 1,000 Mt.</li>
+    <li>Colour scales are logarithmic and fixed across years, so a shade means the same amount in every year. Hatched countries have no figure for that year.</li>
+    <li>Maps use present-day borders, so earlier years are drawn on today's outlines. Antarctica is left off.</li>
+    <li>Share of world is each country's percentage of the world total in your file, a total that also counts international aviation and shipping. Bar colours come from a country-to-continent lookup whose totals match the file's continent rows.</li>
+    <li>Continent totals are the file's own continent rows. They leave out international aviation and shipping, which the file doesn't assign to any continent.</li>
+  </ul>
+</div>
+
+<script>
+/* ---------- Headline figures (worked out from the two emissions files) ---------- */
+dash.calc('headline', {
+  inputs: ['continent_emissions', 'country_emissions'],
+  title: 'Latest-year headline figures',
+  description: 'In the latest year: the six-continent total, the largest continent and its share, and the top country by total CO₂ and by CO₂ per person.',
+  fn: (continent_emissions, country_emissions) => {
+    const n = (v) => (v === '' || v == null || !isFinite(+v) ? null : +v);
+    const yearsList = continent_emissions.map((r) => +r.year);
+    const first = Math.min(...yearsList);
+    const year = Math.max(...yearsList);
+    const conts = continent_emissions.filter((r) => +r.year === year && n(r.co2) != null);
+    const total = conts.reduce((s, r) => s + n(r.co2), 0);
+    const lead = conts.reduce((a, b) => (n(b.co2) > n(a.co2) ? b : a));
+    const countries = country_emissions.filter((r) => +r.year === year);
+    const top = countries.filter((r) => n(r.co2) != null).reduce((a, b) => (n(b.co2) > n(a.co2) ? b : a));
+    const perHead = countries.filter((r) => n(r.co2_per_capita) != null).reduce((a, b) => (n(b.co2_per_capita) > n(a.co2_per_capita) ? b : a));
+    return [{
+      first_year: first,
+      year,
+      total_gt: Math.round(total / 100) / 10,
+      lead_continent: lead.continent,
+      lead_share_pct: Math.round((n(lead.co2) / total) * 100),
+      top_country: top.country,
+      top_country_gt: Math.round(n(top.co2) / 100) / 10,
+      top_pc_country: perHead.country,
+      top_pc_t: Math.round(n(perHead.co2_per_capita) * 10) / 10,
+    }];
+  },
+});
+
+/* ---------- Country table: rank within each year and change from ten years earlier ---------- */
+dash.calc('country_ranks', {
+  inputs: ['country_emissions'],
+  title: 'Yearly rank and 10-year change',
+  description: "Each country's rank by annual CO₂ within its year, and the percentage change in its annual CO₂ from ten years earlier.",
+  fn: (country_emissions) => {
+    const n = (v) => (v === '' || v == null || !isFinite(+v) ? null : +v);
+    const co2At = new Map();
+    const byYear = new Map();
+    for (const r of country_emissions) {
+      const y = +r.year, v = n(r.co2);
+      co2At.set(r.iso_code + '|' + y, v);
+      if (v == null) continue;
+      if (!byYear.has(y)) byYear.set(y, []);
+      byYear.get(y).push(r);
+    }
+    const out = [];
+    for (const [y, rows] of byYear) {
+      rows.sort((a, b) => n(b.co2) - n(a.co2));
+      rows.forEach((r, i) => {
+        const base = co2At.get(r.iso_code + '|' + (y - 10));
+        out.push({
+          iso_code: r.iso_code,
+          year: y,
+          rank: i + 1,
+          change_10y_pct: base != null && base > 0 ? Math.round((n(r.co2) / base - 1) * 1000) / 10 : null,
+        });
+      });
+    }
+    return out;
+  },
+});
+</script>
+
+<script>
+(() => {
+  const root = document.getElementById('co2');
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const RM = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  /* ---------- Theme: classic blues, tuned for light and dark ---------- */
+  const PAL = {
+    light: {
+      ramp: ['#e2edfa', '#b3cff0', '#77a8e4', '#3b7ad3', '#1c54aa', '#0a2e6d'],
+      nd: ['#eceef2', '#c6ccd6'], accent: '#1f5fbf', soft: 'rgba(31, 95, 191, 0.14)', land: '#e6ebf2', ink: '#0b1f44',
+      pick: '#d97706', pickSoft: 'rgba(217, 119, 6, 0.12)',
+      cont: { Asia: '#1f5fbf', 'North America': '#3d9be0', Europe: '#0b2a63', Africa: '#1898a8', 'South America': '#6a6fd8', Oceania: '#7b8aa5' },
+    },
+    dark: {
+      ramp: ['#1b2a45', '#1e3d72', '#2558aa', '#3b7fe0', '#80b1f3', '#d6e7fc'],
+      nd: ['#252a32', '#3b424e'], accent: '#5b93f0', soft: 'rgba(91, 147, 240, 0.22)', land: '#222a37', ink: '#0b1f44',
+      pick: '#fbbf24', pickSoft: 'rgba(251, 191, 36, 0.14)',
+      cont: { Asia: '#5b93f0', 'North America': '#62c1f5', Europe: '#b6d1fa', Africa: '#3ccad6', 'South America': '#a4a7f5', Oceania: '#9aa9c2' },
+    },
+  };
+  const probe = document.createElement('span');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;color:var(--color-bg, Canvas)';
+  root.appendChild(probe);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 1;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  function toRGB(str) {
+    try {
+      cx.clearRect(0, 0, 1, 1);
+      cx.fillStyle = '#000000';
+      cx.fillStyle = str;
+      cx.fillRect(0, 0, 1, 1);
+      const p = cx.getImageData(0, 0, 1, 1).data;
+      return p[3] ? { r: p[0], g: p[1], b: p[2] } : null;
+    } catch (e) { return null; }
+  }
+  function detectDark() {
+    const c = toRGB(getComputedStyle(probe).color);
+    if (!c) return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 128;
+  }
+  function piece(colors) {
+    if (d3.piecewise) return d3.piecewise(d3.interpolateLab, colors);
+    const n = colors.length - 1;
+    return (t) => {
+      t = Math.max(0, Math.min(1, t));
+      const i = Math.min(n - 1, Math.floor(t * n));
+      return d3.interpolateLab(colors[i], colors[i + 1])(t * n - i);
+    };
+  }
+  const S = { dark: null, pal: PAL.light, interp: null, data: null, dataVer: 0, geo: null, geoVer: 0, cont: null, raw: {}, uid: 0, jumped: false, picked: null, contOf: new Map() };
+  function ensureTheme() {
+    const dark = detectDark();
+    if (dark === S.dark && S.interp) return false;
+    S.dark = dark;
+    S.pal = dark ? PAL.dark : PAL.light;
+    S.interp = piece(S.pal.ramp);
+    root.style.setProperty('--co2-accent', S.pal.accent);
+    root.style.setProperty('--co2-accent-soft', S.pal.soft);
+    root.style.setProperty('--co2-nd-bg', S.pal.nd[0]);
+    root.style.setProperty('--co2-nd-line', S.pal.nd[1]);
+    root.style.setProperty('--co2-land', S.pal.land);
+    root.style.setProperty('--co2-pick', S.pal.pick);
+    root.style.setProperty('--co2-pick-soft', S.pal.pickSoft);
+    return true;
+  }
+  const colorOf = (name) => S.pal.cont[name] || S.pal.accent;
+  function inkFor(color) {
+    const c = d3.color(color);
+    if (!c) return '#ffffff';
+    const { r, g, b } = c.rgb();
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.56 ? '#ffffff' : S.pal.ink;
+  }
+
+  /* ---------- Scales and formats ---------- */
+  function niceUp(v) {
+    if (!(v > 0)) return 1;
+    const p = 10 ** Math.floor(Math.log10(v));
+    return (Math.ceil((v / p) * 2) / 2) * p;
+  }
+  function logColor(lo, hi) {
+    const a = Math.log10(lo), b = Math.log10(hi);
+    const f = (v) => {
+      if (v == null || !isFinite(v)) return null;
+      const t = (Math.log10(Math.max(v, lo)) - a) / (b - a);
+      return S.interp(Math.max(0, Math.min(1, t)));
+    };
+    f.lo = lo; f.hi = hi;
+    return f;
+  }
+  const num = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = +v;
+    return Number.isFinite(n) ? n : null;
+  };
+  const f0 = d3.format(',.0f'), f1 = d3.format(',.1f'), f2 = d3.format(',.2f'), f3 = d3.format(',.3~f');
+  const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+  function fmtMt(v) {
+    if (v == null) return 'No data';
+    if (v === 0) return '0 Mt';
+    if (v >= 100) return f0(v) + ' Mt';
+    if (v >= 1) return f1(v) + ' Mt';
+    return f3(v) + ' Mt';
+  }
+  function fmtSmart(v) {
+    if (v == null) return 'No data';
+    return v >= 1000 ? f2(v / 1000) + ' Gt' : fmtMt(v);
+  }
+  function fmtT(v) {
+    if (v == null) return 'No data';
+    if (v === 0) return '0 t';
+    if (v >= 10) return f1(v) + ' t';
+    if (v >= 0.1) return f2(v) + ' t';
+    return f3(v) + ' t';
+  }
+  const fmtPop = (v) => (v == null ? 'No data' : compact.format(v));
+  const fmtPct = (v) => (v == null ? 'No data' : v > 0 && v < 0.1 ? 'under 0.1%' : d3.format('.1f')(v) + '%');
+  const tickLabel = (v) => (v >= 1000 ? String(+(v / 1000).toPrecision(3)) + 'k' : String(+v.toPrecision(3)));
+  const sizeLabel = (v) => (v >= 1000 ? String(+(v / 1000).toPrecision(3)) + ' Gt' : String(+v.toPrecision(3)) + ' Mt');
+
+  /* ---------- Parsing ---------- */
+  function parseCountries(raw) {
+    const rows = raw.map((r) => ({
+      country: r.country, iso: r.iso_code, year: +r.year, pop: num(r.population), co2: num(r.co2),
+      pc: num(r.co2_per_capita), share: num(r.share_global_co2), cum: num(r.cumulative_co2),
+    })).filter((r) => r.iso && Number.isFinite(r.year));
+    const byYear = new Map();
+    const latest = new Map();
+    for (const r of rows) {
+      let m = byYear.get(r.year);
+      if (!m) byYear.set(r.year, (m = new Map()));
+      m.set(r.iso, r);
+      const p = latest.get(r.iso);
+      if (!p || r.year > p.year) latest.set(r.iso, r);
+    }
+    const pcs = rows.map((r) => r.pc).filter((v) => v != null && v > 0).sort(d3.ascending);
+    return {
+      rows, byYear, latest,
+      years: d3.extent(rows, (r) => r.year),
+      maxCo2: d3.max(rows, (r) => r.co2) || 1,
+      pcHi: (d3.quantileSorted ? d3.quantileSorted(pcs, 0.995) : d3.quantile(pcs, 0.995)) || 1,
+      maxCum: d3.max([...latest.values()], (r) => r.cum) || 1,
+    };
+  }
+  function parseShapes(raw) {
+    const list = raw.map((r) => ({ iso: r.iso_code, name: r.name, x: +r.x, y: +r.y, d: r.d })).filter((s) => s.d);
+    return { list, byIso: new Map(list.map((s) => [s.iso, s])), W: +raw[0].w, H: +raw[0].h };
+  }
+  function parseCont(raw) {
+    const rows = raw.map((r) => ({ name: r.continent, year: +r.year, v: num(r.co2) })).filter((r) => r.name && Number.isFinite(r.year));
+    const years = d3.extent(rows, (r) => r.year);
+    const series = [...d3.group(rows, (r) => r.name)].map(([name, rs]) => {
+      rs.sort((a, b) => a.year - b.year);
+      return { name, values: rs, byYear: new Map(rs.map((r) => [r.year, r.v])) };
+    });
+    series.sort((a, b) => (b.byYear.get(years[1]) ?? 0) - (a.byYear.get(years[1]) ?? 0));
+    const total = [];
+    for (let y = years[0]; y <= years[1]; y++) {
+      let s = 0, any = false;
+      for (const se of series) { const v = se.byYear.get(y); if (v != null) { s += v; any = true; } }
+      if (any) total.push({ year: y, v: s });
+    }
+    return { series, years, total };
+  }
+
+  /* ---------- Shared bits: icons, tooltips, states ---------- */
+  function icon(kind) {
+    const s = document.createElementNS(NS, 'svg');
+    s.setAttribute('viewBox', '0 0 16 16');
+    s.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(NS, 'path');
+    const d = { play: 'M4.5 2.5v11l9-5.5z', pause: 'M3.5 2.5h3v11h-3zM9.5 2.5h3v11h-3z', prev: 'M10 3 5 8l5 5', next: 'M6 3l5 5-5 5' }[kind];
+    p.setAttribute('d', d);
+    s.appendChild(p);
+    return s;
+  }
+  function makeTip(box) {
+    const t = document.createElement('div');
+    t.className = 'co2-tip';
+    t.hidden = true;
+    box.appendChild(t);
+    return t;
+  }
+  function fillTip(tip, head, lines) {
+    tip.replaceChildren();
+    const h = document.createElement('div');
+    h.className = 'co2-tip-h';
+    h.textContent = head;
+    tip.appendChild(h);
+    for (const l of lines) {
+      const row = document.createElement('div');
+      row.className = 'co2-tip-r' + (l.strong ? ' is-strong' : '');
+      if (l.color) {
+        const sw = document.createElement('span');
+        sw.className = 'co2-sw';
+        sw.style.background = l.color;
+        row.appendChild(sw);
+      }
+      const a = document.createElement('span');
+      a.className = 'co2-tip-l';
+      a.textContent = l.label;
+      const b = document.createElement('span');
+      b.className = 'co2-tip-v';
+      b.textContent = l.value;
+      row.append(a, b);
+      tip.appendChild(row);
+    }
+    tip.hidden = false;
+  }
+  function placeTip(tip, box, ev) {
+    if (tip.hidden) return;
+    const r = box.getBoundingClientRect();
+    const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = px + 14, y = py + 14;
+    if (x + tw > r.width - 4) x = px - tw - 14;
+    if (x < 4) x = 4;
+    if (y + th > r.height - 4) y = py - th - 14;
+    if (y < 4) y = 4;
+    tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
+  const isFail = (s) => s === 'error' || s === 'connect' || s === 'declined' || s === 'missing';
+  function clearChart(box) { box.querySelectorAll(':scope > svg, :scope > .co2-fail').forEach((n) => n.remove()); }
+  function showFail(box) {
+    box.classList.remove('dash-skeleton');
+    clearChart(box);
+    const f = document.createElement('div');
+    f.className = 'co2-fail';
+    const dot = document.createElement('span');
+    dot.className = 'co2-fail-dot';
+    f.append(dot, document.createTextNode('Failed to load'));
+    box.appendChild(f);
+  }
+  function combine(...st) {
+    if (st.some(isFail)) return 'fail';
+    return st.every((s) => s === 'ok') ? 'ok' : 'loading';
+  }
+
+  /* ---------- Year control: play, year, step, slider ---------- */
+  function yearControl(host, idp, onChange, opts = {}) {
+    const every = () => (opts.interval ? opts.interval() : 110);
+    const mk = (cls, label) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.setAttribute('aria-label', label); return b; };
+    const play = mk('co2-play', 'Play through the years');
+    play.id = idp + '-play';
+    play.appendChild(icon('play'));
+    const out = document.createElement('output');
+    out.className = 'co2-year';
+    out.id = idp + '-out';
+    out.textContent = '—';
+    const prev = mk('co2-step', 'Previous year');
+    prev.id = idp + '-prev';
+    prev.appendChild(icon('prev'));
+    const range = document.createElement('input');
+    range.type = 'range';
+    range.className = 'co2-range';
+    range.id = idp + '-year';
+    range.step = '1';
+    range.setAttribute('aria-label', 'Year');
+    const next = mk('co2-step', 'Next year');
+    next.id = idp + '-next';
+    next.appendChild(icon('next'));
+    host.append(play, out, prev, range, next);
+    const parts = [play, prev, range, next];
+    parts.forEach((p) => { p.disabled = true; });
+    let timer = null, min = 0, max = 0, val = null, ready = false;
+    function show() { range.value = String(val); out.textContent = String(val); }
+    function set(v, src) {
+      v = Math.max(min, Math.min(max, Math.round(v)));
+      if (v === val && src !== 'play') return;
+      val = v;
+      show();
+      onChange(v, src);
+    }
+    function stop() {
+      if (!timer) return;
+      clearInterval(timer);
+      timer = null;
+      play.replaceChildren(icon('play'));
+      play.setAttribute('aria-label', 'Play through the years');
+    }
+    const tick = () => {
+      if (val >= max) { stop(); return; }
+      set(val + 1, 'play');
+    };
+    function start() {
+      if (val >= max) set(min, 'step');
+      play.replaceChildren(icon('pause'));
+      play.setAttribute('aria-label', 'Pause');
+      timer = setInterval(tick, every());
+    }
+    play.addEventListener('click', () => (timer ? stop() : start()));
+    range.addEventListener('input', () => { stop(); set(+range.value, 'drag'); });
+    range.addEventListener('change', () => { stop(); set(+range.value, 'step'); });
+    prev.addEventListener('click', () => { stop(); set(val - 1, 'step'); });
+    next.addEventListener('click', () => { stop(); set(val + 1, 'step'); });
+    return {
+      init(lo, hi) {
+        min = lo; max = hi;
+        range.min = String(lo);
+        range.max = String(hi);
+        if (val == null) val = hi;
+        val = Math.max(lo, Math.min(hi, val));
+        show();
+        if (!ready) { ready = true; parts.forEach((p) => { p.disabled = host.classList.contains('is-off'); }); }
+      },
+      get value() { return val; },
+      get ready() { return ready; },
+      get playing() { return !!timer; },
+      restart() {
+        if (!timer) return;
+        clearInterval(timer);
+        timer = setInterval(tick, every());
+      },
+      setOff(off) {
+        stop();
+        host.classList.toggle('is-off', off);
+        if (ready) parts.forEach((p) => { p.disabled = off; });
+      },
+    };
+  }
+
+  /* ---------- Choropleth maps ---------- */
+  const maps = {
+    annual: {
+      box: $('annual-map-chart'), legend: $('annual-legend'), ndId: 'co2-nd-annual',
+      aria: 'World map shaded by each country’s annual CO₂ emissions',
+      value: (r) => r.co2,
+      scaleFor: () => logColor(0.01, niceUp(S.data.maxCo2)),
+      unit: 'Mt CO₂ per year (log scale)', clampTop: false,
+      lines: (r) => [
+        { label: 'Annual CO₂', value: fmtMt(r.co2), strong: true },
+        { label: 'Share of world', value: fmtPct(r.share) },
+        { label: 'Per person', value: fmtT(r.pc) },
+        { label: 'Population', value: fmtPop(r.pop) },
+      ],
+    },
+    pc: {
+      box: $('pc-map-chart'), legend: $('pc-legend'), ndId: 'co2-nd-pc',
+      aria: 'World map shaded by each country’s CO₂ emissions per person',
+      value: (r) => r.pc,
+      scaleFor: () => logColor(0.01, niceUp(S.data.pcHi)),
+      unit: 'Tonnes CO₂ per person per year (log scale)', clampTop: true,
+      lines: (r) => [
+        { label: 'Per person', value: fmtT(r.pc), strong: true },
+        { label: 'Annual CO₂', value: fmtMt(r.co2) },
+        { label: 'Population', value: fmtPop(r.pop) },
+      ],
+    },
+  };
+  maps.annual.ctl = yearControl($('annual-ctrl'), 'annual', () => colorMap(maps.annual));
+  maps.pc.ctl = yearControl($('pc-ctrl'), 'pc', () => colorMap(maps.pc));
+  for (const m of Object.values(maps)) m.tip = makeTip(m.box);
+
+  function buildMap(m) {
+    const G = S.geo;
+    m.box.style.aspectRatio = `${G.W} / ${G.H}`;
+    clearChart(m.box);
+    const svg = d3.create('svg').attr('class', 'co2-svg').attr('viewBox', `0 0 ${G.W} ${G.H}`).attr('width', '100%').attr('role', 'img').attr('aria-label', m.aria);
+    const pat = svg.append('defs').append('pattern').attr('id', m.ndId).attr('patternUnits', 'userSpaceOnUse').attr('width', 4).attr('height', 4).attr('patternTransform', 'rotate(45)');
+    m.ndBg = pat.append('rect').attr('width', 4).attr('height', 4);
+    m.ndLine = pat.append('line').attr('x1', 2).attr('y1', 0).attr('x2', 2).attr('y2', 4).attr('stroke-width', 1.3);
+    m.hoverEl = null;
+    m.paths = svg.append('g').selectAll('path').data(G.list).join('path').attr('class', 'co2-country').attr('d', (d) => d.d)
+      .on('pointerenter', function (ev, d) {
+        if (m.hoverEl && m.hoverEl !== this) d3.select(m.hoverEl).classed('is-hover', false);
+        m.hoverEl = this;
+        m.hover = d;
+        d3.select(this).raise().classed('is-hover', true);
+        showMapTip(m, ev);
+      })
+      .on('pointermove', (ev) => placeTip(m.tip, m.box, ev))
+      .on('pointerleave', function (ev) {
+        if (ev.pointerType === 'touch') return;
+        d3.select(this).classed('is-hover', false);
+        m.hover = null; m.hoverEl = null;
+        m.tip.hidden = true;
+      })
+      .on('click', (ev, d) => pick(d.iso, 'map'));
+    svg.on('pointerdown', (ev) => {
+      if (ev.target.tagName === 'path') return;
+      if (m.hoverEl) d3.select(m.hoverEl).classed('is-hover', false);
+      m.hover = null; m.hoverEl = null;
+      m.tip.hidden = true;
+    });
+    m.box.insertBefore(svg.node(), m.tip);
+    m.builtGeo = S.geoVer;
+  }
+  function showMapTip(m, ev) {
+    const d = m.hover;
+    if (!d || !S.data) return;
+    const yr = m.ctl.value;
+    const r = S.data.byYear.get(yr)?.get(d.iso);
+    fillTip(m.tip, `${r ? r.country : d.name} · ${yr}`, r ? m.lines(r) : [{ label: 'No figure for this year', value: '' }]);
+    if (ev) placeTip(m.tip, m.box, ev);
+  }
+  function colorMap(m) {
+    if (!m.paths || !S.data || !m.scale) return;
+    const byIso = S.data.byYear.get(m.ctl.value) || new Map();
+    const nd = `url(#${m.ndId}) ${S.pal.nd[0]}`;
+    m.paths.attr('fill', (d) => {
+      const r = byIso.get(d.iso);
+      const v = r ? m.value(r) : null;
+      return v == null ? nd : m.scale(v);
+    });
+    m.ndBg.attr('fill', S.pal.nd[0]);
+    m.ndLine.attr('stroke', S.pal.nd[1]);
+    if (m.hover) showMapTip(m);
+  }
+  function drawLogLegend(el, scale, unit, clampTop) {
+    el.replaceChildren();
+    const leg = document.createElement('div');
+    leg.className = 'co2-leg';
+    const cap = document.createElement('span');
+    cap.className = 'co2-leg-cap';
+    cap.textContent = unit;
+    const bar = document.createElement('div');
+    bar.className = 'co2-leg-bar';
+    const stops = d3.range(0, 1.0001, 0.1).map((t) => `${S.interp(t)} ${Math.round(t * 100)}%`);
+    bar.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+    const ticks = document.createElement('div');
+    ticks.className = 'co2-leg-ticks';
+    const a = Math.log10(scale.lo), b = Math.log10(scale.hi);
+    const vals = [];
+    for (let e = Math.ceil(a - 1e-9); e <= Math.floor(b + 1e-9); e++) vals.push(10 ** e);
+    const pos = (v) => ((Math.log10(v) - a) / (b - a)) * 100;
+    vals.forEach((v, i) => {
+      const p = pos(v);
+      if (clampTop && p > 88) return;
+      const s = document.createElement('span');
+      s.textContent = tickLabel(v);
+      s.style.left = p + '%';
+      if (i === 0 && p < 2) s.classList.add('is-first');
+      if (p > 94) s.classList.add('is-last');
+      ticks.appendChild(s);
+    });
+    if (clampTop) {
+      const s = document.createElement('span');
+      s.textContent = tickLabel(scale.hi) + '+';
+      s.style.left = '100%';
+      s.classList.add('is-last');
+      ticks.appendChild(s);
+    }
+    leg.append(cap, bar, ticks);
+    const nd = document.createElement('span');
+    nd.className = 'co2-leg-item';
+    const sw = document.createElement('span');
+    sw.className = 'co2-nd-sw';
+    nd.append(sw, document.createTextNode('No data for that year'));
+    el.append(leg, nd);
+  }
+  function renderMap(m, state) {
+    if (state === 'ok') {
+      m.box.classList.remove('dash-skeleton');
+      if (m.builtGeo !== S.geoVer || !m.paths) buildMap(m);
+      m.scale = m.scaleFor();
+      colorMap(m);
+      drawLogLegend(m.legend, m.scale, m.unit, m.clampTop);
+      return;
+    }
+    m.paths = null; m.builtGeo = -1; m.hover = null; m.tip.hidden = true;
+    m.legend.replaceChildren();
+    if (state === 'fail') showFail(m.box);
+    else { clearChart(m.box); m.box.classList.add('dash-skeleton'); }
+  }
+
+  /* ---------- Continent line chart with year-range strip ---------- */
+  const L = { box: $('cont-chart'), chips: $('cont-legend'), presets: $('cont-presets'), out: $('cont-range'), range: null, hidden: new Set(), hoverYear: null };
+  L.tip = makeTip(L.box);
+  function buildChips() {
+    L.chips.replaceChildren(...S.cont.series.map((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'co2-chip';
+      b.setAttribute('aria-pressed', String(!L.hidden.has(s.name)));
+      const sw = document.createElement('span');
+      sw.className = 'co2-sw';
+      sw.style.background = colorOf(s.name);
+      b.append(sw, document.createTextNode(s.name));
+      b.addEventListener('click', () => {
+        if (L.hidden.has(s.name)) L.hidden.delete(s.name); else L.hidden.add(s.name);
+        b.setAttribute('aria-pressed', String(!L.hidden.has(s.name)));
+        if (L.update) L.update();
+      });
+      return b;
+    }));
+  }
+  function buildPresets() {
+    const [y0, y1] = S.cont.years;
+    const opts = [['All years', y0]];
+    for (const v of [1850, 1950, 1990]) if (v > y0 && v < y1) opts.push([`Since ${v}`, v]);
+    L.presets.replaceChildren(...opts.map(([label, from]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'co2-chip co2-preset';
+      b.textContent = label;
+      b.dataset.from = String(from);
+      b.addEventListener('click', () => { if (L.apply) L.apply(from, y1); });
+      return b;
+    }));
+  }
+  function syncPresets() {
+    const [a, b] = L.range;
+    L.presets.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(+btn.dataset.from === a && b === S.cont.years[1])));
+  }
+  function drawLine() {
+    const box = L.box, C = S.cont;
+    box.classList.remove('dash-skeleton');
+    clearChart(box);
+    const width = box.clientWidth;
+    if (!width) return;
+    const narrow = width < 640;
+    const [y0, y1] = C.years;
+    if (!L.range) L.range = [y0, y1];
+    L.range = [Math.max(y0, L.range[0]), Math.min(y1, L.range[1])];
+    buildChips();
+    buildPresets();
+
+    const svgSel = d3.select(box).insert('svg', '.co2-tip').attr('class', 'co2-svg').attr('width', '100%')
+      .attr('role', 'img').attr('aria-label', 'Line chart of annual CO₂ emissions by continent');
+    const measure = (str, cls) => {
+      const t = svgSel.append('text').text(str);
+      if (cls) t.attr('class', cls);
+      const w = t.node().getComputedTextLength();
+      t.remove();
+      return w;
+    };
+    const ml = Math.ceil(Math.max(measure('0.000'), measure('20.0'))) + 12;
+    const endLabels = !narrow;
+    const mr = endLabels ? Math.ceil(d3.max(C.series, (s) => measure(s.name, 'co2-endname') + 8 + measure(fmtSmart(d3.max(s.values, (r) => r.v))))) + 20 : 14;
+    const mt = 26, H1 = narrow ? 230 : 300, gapMid = 44, H2 = narrow ? 44 : 52, mb = 24;
+    const innerW = Math.max(80, width - ml - mr);
+    const totalH = mt + H1 + gapMid + H2 + mb;
+    svgSel.attr('viewBox', `0 0 ${width} ${totalH}`).attr('height', totalH);
+
+    const clipId = 'co2-clip-' + ++S.uid;
+    svgSel.append('defs').append('clipPath').attr('id', clipId).append('rect').attr('x', -2).attr('y', -6).attr('width', innerW + 4).attr('height', H1 + 8);
+    const gF = svgSel.append('g').attr('transform', `translate(${ml},${mt})`);
+    const gGrid = gF.append('g').attr('class', 'co2-grid');
+    const gY = gF.append('g').attr('class', 'co2-axis');
+    const gX = gF.append('g').attr('class', 'co2-axis').attr('transform', `translate(0,${H1})`);
+    const unitT = gF.append('text').attr('class', 'co2-unit').attr('x', -ml + 2).attr('y', -12);
+    const gLines = gF.append('g').attr('clip-path', `url(#${clipId})`);
+    const gEnd = gF.append('g');
+    const gHover = gF.append('g').style('display', 'none');
+    const rule = gHover.append('line').attr('class', 'co2-rule').attr('y1', 0).attr('y2', H1);
+    const gDots = gHover.append('g');
+    const overlay = gF.append('rect').attr('width', innerW).attr('height', H1).attr('fill', 'transparent').style('cursor', 'crosshair');
+    const x = d3.scaleLinear().range([0, innerW]);
+    const y = d3.scaleLinear().range([H1, 0]);
+    let div = 1000;
+    const visible = () => C.series.filter((s) => !L.hidden.has(s.name));
+
+    function showHover(yr, ev) {
+      const [a, b] = L.range;
+      yr = Math.max(a, Math.min(b, yr));
+      L.hoverYear = yr;
+      gHover.style('display', null);
+      rule.attr('x1', x(yr)).attr('x2', x(yr));
+      const vis = visible().map((s) => ({ s, v: s.byYear.get(yr) })).filter((d) => d.v != null);
+      gDots.selectAll('circle').data(vis, (d) => d.s.name).join('circle').attr('class', 'co2-hdot').attr('r', 4)
+        .attr('cx', x(yr)).attr('cy', (d) => y(d.v / div)).attr('fill', (d) => colorOf(d.s.name));
+      const sorted = vis.slice().sort((p, q) => q.v - p.v);
+      const lines = sorted.map((d) => ({ label: d.s.name, value: fmtSmart(d.v), color: colorOf(d.s.name) }));
+      if (sorted.length > 1) lines.push({ label: 'Total shown', value: fmtSmart(d3.sum(sorted, (d) => d.v)), strong: true });
+      if (!lines.length) lines.push({ label: 'No continent selected', value: '' });
+      fillTip(L.tip, String(yr), lines);
+      if (ev) placeTip(L.tip, box, ev);
+    }
+    function hideHover() {
+      L.hoverYear = null;
+      gHover.style('display', 'none');
+      L.tip.hidden = true;
+    }
+    function updateFocus() {
+      const [a, b] = L.range;
+      x.domain([a, b]);
+      const vis = visible();
+      let mx = 0;
+      for (const s of vis) for (const r of s.values) if (r.year >= a && r.year <= b && r.v != null && r.v > mx) mx = r.v;
+      const unit = mx >= 1000 ? 'Gt' : 'Mt';
+      div = unit === 'Gt' ? 1000 : 1;
+      y.domain([0, (mx / div) * 1.06 || 1]).nice(5);
+      const yt = y.ticks(5), yf = y.tickFormat(5);
+      gGrid.selectAll('line').data(yt).join('line').attr('x1', 0).attr('x2', innerW).attr('y1', (d) => y(d)).attr('y2', (d) => y(d));
+      gY.selectAll('text').data(yt).join('text').attr('x', -8).attr('y', (d) => y(d)).attr('dy', '0.32em').attr('text-anchor', 'end').text((d) => yf(d));
+      unitT.text(unit === 'Gt' ? 'Billion tonnes (Gt) CO₂ per year' : 'Million tonnes (Mt) CO₂ per year');
+      const xt = x.ticks(narrow ? 4 : 8).filter(Number.isInteger);
+      gX.call(d3.axisBottom(x).tickValues(xt).tickFormat(d3.format('d')).tickSizeOuter(0).tickSize(4)).attr('font-size', null).attr('font-family', null);
+      const line = d3.line().defined((r) => r.v != null).x((r) => x(r.year)).y((r) => y(r.v / div));
+      gLines.selectAll('path').data(vis, (s) => s.name).join('path').attr('fill', 'none').attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
+        .attr('stroke', (s) => colorOf(s.name)).attr('d', (s) => line(s.values));
+      if (endLabels) {
+        const items = vis.map((s) => ({ s, v: s.byYear.get(b) })).filter((d) => d.v != null).map((d) => ({ ...d, y0: y(d.v / div), ly: y(d.v / div) }));
+        items.sort((p, q) => p.y0 - q.y0);
+        const gap = 15;
+        for (let i = 1; i < items.length; i++) if (items[i].ly < items[i - 1].ly + gap) items[i].ly = items[i - 1].ly + gap;
+        for (let i = items.length - 1; i >= 0; i--) {
+          const lim = i === items.length - 1 ? H1 : items[i + 1].ly - gap;
+          if (items[i].ly > lim) items[i].ly = lim;
+        }
+        const g = gEnd.selectAll('g').data(items, (d) => d.s.name).join((enter) => {
+          const e = enter.append('g');
+          e.append('circle').attr('r', 3);
+          e.append('text');
+          return e;
+        });
+        g.select('circle').attr('cx', innerW).attr('cy', (d) => d.y0).attr('fill', (d) => colorOf(d.s.name));
+        g.select('text').attr('x', innerW + 8).attr('y', (d) => d.ly).attr('dy', '0.32em').each(function (d) {
+          const t = d3.select(this);
+          t.selectAll('tspan').remove();
+          t.append('tspan').attr('class', 'co2-endname').text(d.s.name);
+          t.append('tspan').attr('dx', 8).text(fmtSmart(d.v));
+        });
+      } else gEnd.selectAll('*').remove();
+      L.out.replaceChildren();
+      const bA = document.createElement('b'); bA.textContent = String(a);
+      const bB = document.createElement('b'); bB.textContent = String(b);
+      L.out.append('Showing ', bA, ' to ', bB);
+      syncPresets();
+      if (L.hoverYear != null) showHover(L.hoverYear);
+    }
+    overlay.on('pointerenter pointermove', (ev) => {
+      const [px] = d3.pointer(ev, overlay.node());
+      showHover(Math.round(x.invert(px)), ev);
+    }).on('pointerleave', (ev) => { if (ev.pointerType !== 'touch') hideHover(); });
+
+    // Year-range strip
+    const gC = svgSel.append('g').attr('transform', `translate(${ml},${mt + H1 + gapMid})`);
+    const x2 = d3.scaleLinear([y0, y1], [0, innerW]);
+    const y2 = d3.scaleLinear([0, d3.max(C.total, (d) => d.v) || 1], [H2, 0]);
+    gC.append('text').attr('x', 0).attr('y', -8).text('Year range');
+    gC.append('rect').attr('class', 'co2-ctx-bg').attr('width', innerW).attr('height', H2).attr('rx', 4);
+    gC.append('path').attr('class', 'co2-ctx-area').attr('d', d3.area().x((d) => x2(d.year)).y0(H2).y1((d) => y2(d.v))(C.total));
+    gC.append('g').attr('class', 'co2-axis').attr('transform', `translate(0,${H2})`)
+      .call(d3.axisBottom(x2).tickValues(x2.ticks(narrow ? 4 : 10).filter(Number.isInteger)).tickFormat(d3.format('d')).tickSizeOuter(0).tickSize(4))
+      .attr('font-size', null).attr('font-family', null);
+    const shadeL = gC.append('rect').attr('class', 'co2-shade').attr('y', 0).attr('height', H2);
+    const shadeR = gC.append('rect').attr('class', 'co2-shade').attr('y', 0).attr('height', H2);
+    const gB = gC.append('g').attr('class', 'co2-brush');
+    const gripW = 10, gripH = Math.min(26, H2 - 10);
+    const grips = gC.append('g').style('pointer-events', 'none').selectAll('g').data([0, 1]).join('g');
+    grips.append('rect').attr('class', 'co2-grip').attr('width', gripW).attr('height', gripH).attr('rx', 3).attr('x', -gripW / 2).attr('y', (H2 - gripH) / 2);
+    grips.append('line').attr('class', 'co2-griptick').attr('x1', -1.5).attr('x2', -1.5).attr('y1', H2 / 2 - 5).attr('y2', H2 / 2 + 5);
+    grips.append('line').attr('class', 'co2-griptick').attr('x1', 1.5).attr('x2', 1.5).attr('y1', H2 / 2 - 5).attr('y2', H2 / 2 + 5);
+    function paint(s) {
+      shadeL.attr('x', 0).attr('width', Math.max(0, s[0]));
+      shadeR.attr('x', s[1]).attr('width', Math.max(0, innerW - s[1]));
+      grips.attr('transform', (d, i) => `translate(${s[i]},0)`);
+    }
+    const brush = d3.brushX().extent([[0, 0], [innerW, H2]]).handleSize(18).on('start brush end', (ev) => {
+      const s = ev.selection;
+      if (s) paint(s);
+      if (!ev.sourceEvent) return;
+      if (!s) {
+        L.range = [y0, y1];
+        gB.call(brush.move, [x2(y0), x2(y1)]);
+        updateFocus();
+        return;
+      }
+      let a = Math.round(x2.invert(s[0])), b = Math.round(x2.invert(s[1]));
+      if (b - a < 2) { if (a + 2 <= y1) b = a + 2; else a = b - 2; }
+      L.range = [a, b];
+      updateFocus();
+      if (ev.type === 'end') gB.call(brush.move, [x2(a), x2(b)]);
+    });
+    gB.call(brush);
+    gB.call(brush.move, [x2(L.range[0]), x2(L.range[1])]);
+    L.apply = (a, b) => { L.range = [a, b]; gB.call(brush.move, [x2(a), x2(b)]); updateFocus(); };
+    L.update = updateFocus;
+    updateFocus();
+  }
+  function renderLine(status) {
+    if (status === 'ok' && S.cont) { drawLine(); return; }
+    L.apply = null; L.update = null;
+    L.chips.replaceChildren();
+    L.presets.replaceChildren();
+    L.out.textContent = '—';
+    L.tip.hidden = true;
+    if (isFail(status)) showFail(L.box);
+    else { clearChart(L.box); L.box.classList.add('dash-skeleton'); }
+  }
+
+  /* ---------- Dorling cartogram ---------- */
+  const K = { box: $('carto-chart'), legend: $('carto-legend'), mode: 'year', rescale: false, key: null, nodes: new Map(), list: null, hover: null, svg: null, builtGeo: -1 };
+  K.tip = makeTip(K.box);
+  K.ctl = yearControl($('carto-ctrl'), 'carto', (v, src) => { if (layoutCarto()) drawCarto(src); });
+  const modeYear = $('carto-mode-year'), modeAll = $('carto-mode-all'), rescaleBox = $('carto-rescale');
+  function setMode(mode) {
+    K.mode = mode;
+    modeYear.setAttribute('aria-pressed', String(mode === 'year'));
+    modeAll.setAttribute('aria-pressed', String(mode === 'all'));
+    K.ctl.setOff(mode === 'all');
+    rescaleBox.disabled = mode === 'all';
+    if (S.data && K.svg && layoutCarto()) drawCarto('mode');
+  }
+  modeYear.addEventListener('click', () => setMode('year'));
+  modeAll.addEventListener('click', () => setMode('all'));
+  rescaleBox.addEventListener('change', () => {
+    K.rescale = rescaleBox.checked;
+    if (S.data && K.svg && layoutCarto()) drawCarto('mode');
+  });
+
+  function layoutCarto() {
+    if (!S.data || !S.geo) return false;
+    const all = K.mode === 'all';
+    const yr = K.ctl.value;
+    const key = [K.mode, all ? '' : yr, K.rescale && !all ? 'r' : '', S.dataVer, S.geoVer].join('|');
+    if (key === K.key) return false;
+    K.key = key;
+    const src = all
+      ? [...S.data.latest.values()].map((r) => ({ r, v: r.cum }))
+      : [...(S.data.byYear.get(yr) || new Map()).values()].map((r) => ({ r, v: r.co2 }));
+    const usable = src.filter((d) => d.v != null && d.v > 0 && S.geo.byIso.has(d.r.iso));
+    const domainMax = all ? S.data.maxCum : K.rescale ? d3.max(usable, (d) => d.v) || 1 : S.data.maxCo2;
+    const W = S.geo.W, H = S.geo.H;
+    const rs = d3.scaleSqrt([0, domainMax], [0, H * (all ? 0.2 : 0.16)]);
+    const prev = K.nodes;
+    const nodes = usable.map(({ r, v }) => {
+      const sh = S.geo.byIso.get(r.iso);
+      const p = prev.get(r.iso);
+      return { iso: r.iso, name: r.country, row: r, v, rad: rs(v), tx: sh.x, ty: sh.y, x: p ? p.x : sh.x, y: p ? p.y : sh.y };
+    });
+    nodes.sort((a, b) => b.v - a.v).forEach((n, i) => { n.rank = i + 1; });
+    const warm = prev.size > 0;
+    const ticks = warm ? 120 : 220;
+    const alpha0 = warm ? 0.5 : 1;
+    const bound = () => {
+      for (const n of nodes) {
+        n.x = Math.max(n.rad, Math.min(W - n.rad, n.x));
+        n.y = Math.max(n.rad, Math.min(H - n.rad, n.y));
+      }
+    };
+    const sim = d3.forceSimulation(nodes)
+      .force('x', d3.forceX((d) => d.tx).strength(0.1))
+      .force('y', d3.forceY((d) => d.ty).strength(0.1))
+      .force('collide', d3.forceCollide((d) => d.rad + 0.7).iterations(3))
+      .force('bound', bound)
+      .alpha(alpha0)
+      .alphaDecay(1 - Math.pow(0.001 / alpha0, 1 / ticks))
+      .stop();
+    for (let i = 0; i < ticks; i++) sim.tick();
+    K.nodes = new Map(nodes.map((n) => [n.iso, n]));
+    K.list = nodes;
+    K.rs = rs;
+    K.domainMax = domainMax;
+    return true;
+  }
+  function buildCarto() {
+    const G = S.geo;
+    K.box.style.aspectRatio = `${G.W} / ${G.H}`;
+    clearChart(K.box);
+    const svg = d3.select(K.box).insert('svg', '.co2-tip').attr('class', 'co2-svg').attr('viewBox', `0 0 ${G.W} ${G.H}`).attr('width', '100%')
+      .attr('role', 'img').attr('aria-label', 'Cartogram: one circle per country, sized by CO₂ emissions');
+    svg.append('path').attr('class', 'co2-land').attr('d', G.list.map((s) => s.d).join(''));
+    K.gC = svg.append('g');
+    K.gL = svg.append('g');
+    svg.on('pointerdown', (ev) => {
+      if (ev.target.tagName === 'circle') return;
+      K.gC.selectAll('.is-hover').classed('is-hover', false);
+      K.hover = null;
+      K.tip.hidden = true;
+    });
+    K.svg = svg;
+    K.builtGeo = S.geoVer;
+  }
+  function cartoColor() {
+    return K.mode === 'all' ? logColor(1, niceUp(S.data.maxCum)) : logColor(0.01, niceUp(S.data.maxCo2));
+  }
+  function showCartoTip(ev) {
+    const d = K.hover ? K.nodes.get(K.hover) : null;
+    if (!d) { K.tip.hidden = true; return; }
+    const all = K.mode === 'all';
+    const head = all ? `${d.name} · ${S.data.years[0]}–${S.data.years[1]}` : `${d.name} · ${K.ctl.value}`;
+    const lines = all
+      ? [{ label: 'CO₂, all years added', value: fmtSmart(d.v), strong: true }, { label: 'Rank', value: `${d.rank} of ${K.list.length}` }]
+      : [{ label: 'Annual CO₂', value: fmtMt(d.v), strong: true }, { label: 'Share of world', value: fmtPct(d.row.share) }, { label: 'Rank that year', value: `${d.rank} of ${K.list.length}` }];
+    fillTip(K.tip, head, lines);
+    if (ev) placeTip(K.tip, K.box, ev);
+  }
+  function drawCarto(src) {
+    if (!K.svg || !K.list) return;
+    const k = (K.box.clientWidth || S.geo.W) / S.geo.W;
+    const dur = RM.matches || !src || src === 'drag' ? 0 : src === 'play' ? 100 : 500;
+    const color = cartoColor();
+    const circles = K.gC.selectAll('circle').data(K.list, (d) => d.iso);
+    if (dur) circles.exit().interrupt().transition().duration(dur).attr('r', 0).remove();
+    else circles.exit().interrupt().remove();
+    const enter = circles.enter().append('circle').attr('class', 'co2-bubble').attr('cx', (d) => d.x).attr('cy', (d) => d.y).attr('r', 0)
+      .on('pointerenter', function (ev, d) {
+        K.gC.selectAll('.is-hover').classed('is-hover', false);
+        K.hover = d.iso;
+        d3.select(this).classed('is-hover', true).raise();
+        showCartoTip(ev);
+      })
+      .on('pointermove', (ev) => placeTip(K.tip, K.box, ev))
+      .on('pointerleave', function (ev) {
+        if (ev.pointerType === 'touch') return;
+        d3.select(this).classed('is-hover', false);
+        K.hover = null;
+        K.tip.hidden = true;
+      })
+      .on('click', (ev, d) => pick(d.iso, 'carto'));
+    const merged = enter.merge(circles).interrupt();
+    merged.classed('is-picked', (d) => d.iso === S.picked);
+    (dur ? merged.transition().duration(dur).ease(d3.easeCubicOut) : merged)
+      .attr('cx', (d) => d.x).attr('cy', (d) => d.y).attr('r', (d) => d.rad).attr('fill', (d) => color(d.v));
+
+    const fsPx = 10.5;
+    const labels = K.list.filter((d) => d.rad * k >= 11).map((d) => {
+      const px = d.rad * k;
+      const text = d.name.length * 0.58 * fsPx <= px * 1.75 ? d.name : d.iso.length <= 3 && d.iso.length * 0.7 * fsPx <= px * 1.8 ? d.iso : null;
+      return text ? { d, text } : null;
+    }).filter(Boolean);
+    const t = K.gL.selectAll('text').data(labels, (l) => l.d.iso);
+    t.exit().interrupt().remove();
+    const tm = t.enter().append('text').attr('class', 'co2-blabel').attr('x', (l) => l.d.x).attr('y', (l) => l.d.y).merge(t).interrupt();
+    tm.text((l) => l.text).style('font-size', fsPx / k + 'px').style('fill', (l) => inkFor(color(l.d.v)));
+    (dur ? tm.transition().duration(dur).ease(d3.easeCubicOut) : tm).attr('x', (l) => l.d.x).attr('y', (l) => l.d.y);
+
+    if (K.hover) {
+      if (K.nodes.has(K.hover)) showCartoTip();
+      else { K.hover = null; K.tip.hidden = true; }
+    }
+    drawCartoLegend(k, color);
+  }
+  function drawCartoLegend(k, color) {
+    const el = K.legend;
+    el.replaceChildren();
+    const top = 10 ** Math.floor(Math.log10(K.domainMax));
+    const vals = [top, top / 10, top / 100];
+    const rpx = vals.map((v) => K.rs(v) * k);
+    const R = Math.max(4, rpx[0]);
+    const h = Math.ceil(R * 2 + 6), w = Math.ceil(R * 2 + 70);
+    const svg = d3.create('svg').attr('class', 'co2-svg co2-sizeleg').attr('width', w).attr('height', h).attr('viewBox', `0 0 ${w} ${h}`).style('width', w + 'px');
+    let lastY = -Infinity;
+    vals.forEach((v, i) => {
+      const r = rpx[i];
+      if (r < 1.5) return;
+      const cy = h - 3 - r, ty = h - 3 - 2 * r;
+      svg.append('circle').attr('cx', R + 2).attr('cy', cy).attr('r', r).style('fill', color(v)).style('fill-opacity', 0.35);
+      if (ty - lastY < 13 && lastY !== -Infinity) return;
+      lastY = ty;
+      svg.append('line').attr('x1', R + 2).attr('x2', 2 * R + 10).attr('y1', ty).attr('y2', ty);
+      svg.append('text').attr('x', 2 * R + 14).attr('y', ty).attr('dy', '0.32em').text(sizeLabel(v));
+    });
+    const cap = document.createElement('div');
+    cap.className = 'co2-leg';
+    const c1 = document.createElement('span');
+    c1.className = 'co2-leg-cap';
+    c1.textContent = K.mode === 'all'
+      ? 'Circle area shows each country’s CO₂ added up over every year. Darker blue means more.'
+      : K.rescale
+        ? 'Circle area shows CO₂ that year, rescaled so the largest emitter that year fills the same space. Darker blue means more.'
+        : 'Circle area shows CO₂ that year, on one scale for every year. Darker blue means more.';
+    cap.append(c1);
+    el.append(svg.node(), cap);
+  }
+  function renderCarto(state) {
+    if (state !== 'ok') {
+      K.svg = null; K.builtGeo = -1; K.key = null; K.list = null; K.hover = null; K.tip.hidden = true;
+      K.legend.replaceChildren();
+      if (state === 'fail') showFail(K.box);
+      else { clearChart(K.box); K.box.classList.add('dash-skeleton'); }
+      return;
+    }
+    K.box.classList.remove('dash-skeleton');
+    if (K.builtGeo !== S.geoVer || !K.svg) { K.key = null; buildCarto(); }
+    layoutCarto();
+    drawCarto(null);
+  }
+
+  /* ---------- Country rankings table ---------- */
+  const T = {
+    box: $('table-box'), table: $('country-table-grid'), search: $('table-search'), big: $('table-bigonly'),
+    pill: $('table-picked'), count: $('table-count'), sort: { key: 'rank', dir: 'asc' }, ranks: null, ready: false,
+  };
+  T.tbody = T.table.querySelector('tbody');
+  T.ctl = yearControl($('table-ctrl'), 'table', () => renderTableBody());
+  const SORTS = {
+    rank: { get: (r) => r.rank, dir: 'asc' },
+    country: { get: (r) => r.country, dir: 'asc', text: true },
+    co2: { get: (r) => r.co2, dir: 'desc' },
+    share: { get: (r) => r.share, dir: 'desc' },
+    pc: { get: (r) => r.pc, dir: 'desc' },
+    chg: { get: (r) => r.chg, dir: 'desc' },
+  };
+  const isoOf = (tr) => decodeURIComponent(tr.dataset.key.split(',')[0]);
+  T.table.querySelectorAll('th[data-sort]').forEach((th) => th.querySelector('button').addEventListener('click', () => {
+    const k = th.dataset.sort;
+    if (T.sort.key === k) T.sort.dir = T.sort.dir === 'asc' ? 'desc' : 'asc';
+    else T.sort = { key: k, dir: SORTS[k].dir };
+    renderTableBody();
+  }));
+  T.search.addEventListener('input', () => renderTableBody());
+  T.big.addEventListener('change', () => renderTableBody());
+  T.pill.addEventListener('click', () => pick(S.picked, 'table'));
+  T.tbody.addEventListener('click', (ev) => {
+    const tr = ev.target.closest('tr[data-key]');
+    if (tr) pick(isoOf(tr), 'table');
+  });
+  T.tbody.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const tr = ev.target.closest('tr[data-key]');
+    if (tr) { ev.preventDefault(); pick(isoOf(tr), 'table'); }
+  });
+  function parseRanks(raw) {
+    const m = new Map();
+    for (const r of raw) m.set(r.iso_code + '|' + +r.year, { rank: num(r.rank), chg: num(r.change_10y_pct) });
+    return m;
+  }
+  const fmtCellMt = (v) => (v >= 100 ? f0(v) : v >= 1 ? f1(v) : f3(v));
+  const fmtCellT = (v) => (v >= 10 ? f1(v) : f2(v));
+  const fmtChg = d3.format('+,.1f');
+  function renderTableBody() {
+    if (!T.ready || !S.data) return;
+    const yr = T.ctl.value;
+    const q = T.search.value.trim().toLowerCase();
+    const big = T.big.checked;
+    const all = [...(S.data.byYear.get(yr) || new Map()).values()].filter((r) => r.co2 != null);
+    const rows = all
+      .filter((r) => (!big || (r.pop != null && r.pop >= 1e6)) && (!q || r.country.toLowerCase().includes(q)))
+      .map((r) => {
+        const k = T.ranks ? T.ranks.get(r.iso + '|' + yr) : null;
+        return { ...r, rank: k ? k.rank : null, chg: k ? k.chg : null };
+      });
+    const s = SORTS[T.sort.key], sign = T.sort.dir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      const va = s.get(a), vb = s.get(b);
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return (s.text ? String(va).localeCompare(String(vb)) : va - vb) * sign;
+    });
+    const maxCo2 = d3.max(all, (r) => r.co2) || 1;
+    const frag = document.createDocumentFragment();
+    for (const r of rows) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = encodeURIComponent(r.iso) + ',' + encodeURIComponent(String(yr));
+      tr.tabIndex = 0;
+      if (r.iso === S.picked) tr.classList.add('is-picked');
+      const td = (cls) => { const c = document.createElement('td'); if (cls) c.className = cls; tr.appendChild(c); return c; };
+      td('co2-rankcell').textContent = r.rank == null ? '' : String(r.rank);
+      td().textContent = r.country;
+      const co2Td = td('num');
+      co2Td.textContent = fmtCellMt(r.co2);
+      const bar = document.createElement('span');
+      bar.className = 'co2-cellbar';
+      bar.style.width = Math.max(1, (r.co2 / maxCo2) * 100) + '%';
+      co2Td.appendChild(bar);
+      td('num').textContent = r.share == null ? '' : f2(r.share) + '%';
+      td('num').textContent = r.pc == null ? '' : fmtCellT(r.pc);
+      const c = td('num');
+      if (r.chg != null) {
+        c.textContent = fmtChg(r.chg) + '%';
+        if (r.chg > 0) c.classList.add('co2-up');
+        else if (r.chg < 0) c.classList.add('co2-down');
+      }
+      frag.appendChild(tr);
+    }
+    T.tbody.replaceChildren(frag);
+    T.table.querySelectorAll('th[data-sort]').forEach((th) => {
+      if (th.dataset.sort === T.sort.key) th.setAttribute('aria-sort', T.sort.dir === 'asc' ? 'ascending' : 'descending');
+      else th.removeAttribute('aria-sort');
+    });
+    T.count.textContent = `Showing ${rows.length} of ${all.length} countries with figures for ${yr}${big ? ' (countries under 1 million people hidden)' : ''}. Rank is out of all ${all.length}.`;
+  }
+  function renderTable(status) {
+    if (status === 'ok' && S.data) {
+      T.box.classList.remove('dash-skeleton');
+      T.box.querySelectorAll(':scope > .co2-fail').forEach((n) => n.remove());
+      T.ready = true;
+      renderTableBody();
+      return;
+    }
+    T.ready = false;
+    T.tbody.replaceChildren();
+    T.count.textContent = '—';
+    if (isFail(status)) showFail(T.box);
+    else T.box.classList.add('dash-skeleton');
+  }
+  function scrollRowIntoView(iso) {
+    const tr = [...T.tbody.querySelectorAll('tr[data-key]')].find((r) => isoOf(r) === iso);
+    if (!tr) return;
+    const head = T.table.tHead ? T.table.tHead.offsetHeight : 0;
+    const top = tr.offsetTop - head;
+    if (top < T.box.scrollTop || tr.offsetTop + tr.offsetHeight > T.box.scrollTop + T.box.clientHeight) {
+      T.box.scrollTop = Math.max(0, top - T.box.clientHeight / 3);
+    }
+  }
+
+  /* ---------- Top-20 bar chart race ---------- */
+  const R = { box: $('race-chart'), key: $('race-key'), speedSel: $('race-speed'), N: 20, svg: null, hover: null };
+  R.tip = makeTip(R.box);
+  const SPEEDS = [['Slow', 700], ['Normal', 350], ['Fast', 150]];
+  R.speedSel.replaceChildren(...SPEEDS.map(([label, ms]) => new Option(label, String(ms))));
+  R.speedSel.value = '350';
+  R.ctl = yearControl($('race-ctrl'), 'race', (v, src) => raceUpdate(src), { interval: () => +R.speedSel.value || 350 });
+  R.speedSel.addEventListener('change', () => R.ctl.restart());
+  const raceColor = (iso) => S.pal.cont[S.contOf.get(iso)] || S.pal.accent;
+  const fmtShare = (v) => (v >= 1 ? d3.format('.1f')(v) : d3.format('.2f')(v)) + '%';
+  function raceTop(yr) {
+    const m = S.data.byYear.get(yr);
+    if (!m) return [];
+    return [...m.values()]
+      .filter((r) => r.share != null && r.share > 0)
+      .sort((a, b) => b.share - a.share || (b.co2 || 0) - (a.co2 || 0))
+      .slice(0, R.N)
+      .map((r, i) => ({ iso: r.iso, name: r.country, v: r.share, co2: r.co2, rank: i + 1 }));
+  }
+  function fitName(name) {
+    const w = R.nameW.get(name);
+    if (!w || w <= R.nameMax) return name;
+    const keep = Math.max(3, Math.floor((name.length * R.nameMax) / w) - 1);
+    return name.slice(0, keep).trimEnd() + '…';
+  }
+  function buildRace() {
+    const box = R.box;
+    clearChart(box);
+    R.svg = null;
+    const width = box.clientWidth;
+    if (!width) return false;
+    const narrow = width < 560;
+    const step = narrow ? 20 : 25;
+    const innerH = R.N * step;
+    const mt = 26, mb = 8;
+    const svgSel = d3.select(box).insert('svg', '.co2-tip').attr('class', 'co2-svg').attr('width', '100%')
+      .attr('role', 'img').attr('aria-label', 'Bar chart of the 20 countries with the largest share of world CO₂ emissions in the chosen year');
+    if (R.namesVer !== S.dataVer) {
+      const set = new Set();
+      for (const y of S.data.byYear.keys()) for (const d of raceTop(y)) set.add(d.name);
+      R.names = [...set];
+      R.namesVer = S.dataVer;
+    }
+    const meas = svgSel.append('text').attr('class', 'co2-rname');
+    R.nameW = new Map();
+    let maxW = 0;
+    for (const nm of R.names) {
+      meas.text(nm);
+      const w = meas.node().getComputedTextLength();
+      R.nameW.set(nm, w);
+      if (w > maxW) maxW = w;
+    }
+    meas.attr('class', 'co2-rval').text('99.99%');
+    const valW = meas.node().getComputedTextLength();
+    meas.remove();
+    const ml = Math.min(Math.ceil(maxW) + 12, Math.round(width * (narrow ? 0.38 : 0.26)));
+    R.nameMax = ml - 12;
+    const mr = Math.ceil(valW) + 12;
+    const innerW = Math.max(60, width - ml - mr);
+    const totalH = mt + innerH + mb;
+    svgSel.attr('viewBox', `0 0 ${width} ${totalH}`).attr('height', totalH);
+    const clipId = 'co2-clip-' + ++S.uid;
+    svgSel.append('defs').append('clipPath').attr('id', clipId).append('rect')
+      .attr('x', -ml).attr('y', -2).attr('width', width).attr('height', innerH + 4);
+    const g = svgSel.append('g').attr('transform', `translate(${ml},${mt})`);
+    R.gAxis = g.append('g').attr('class', 'co2-axis');
+    R.wm = g.append('text').attr('class', 'co2-watermark').attr('x', innerW).attr('y', innerH - 30)
+      .style('font-size', Math.round(Math.min(96, innerH * 0.2, innerW * 0.2)) + 'px');
+    R.sum = g.append('text').attr('class', 'co2-race-sum').attr('x', innerW).attr('y', innerH - 8);
+    R.gBars = g.append('g').attr('clip-path', `url(#${clipId})`);
+    Object.assign(R, { svg: svgSel, innerW, innerH, step, width, x: d3.scaleLinear().range([0, innerW]), builtVer: S.dataVer });
+    return true;
+  }
+  function showRaceTip(ev) {
+    const d = R.hover ? R.current.find((c) => c.iso === R.hover) : null;
+    if (!d) { R.tip.hidden = true; return; }
+    fillTip(R.tip, `${d.name} · ${R.ctl.value}`, [
+      { label: 'Share of world CO₂', value: d3.format('.2f')(d.v) + '%', strong: true },
+      { label: 'Annual CO₂', value: fmtMt(d.co2) },
+      { label: 'Rank', value: String(d.rank) },
+      { label: 'Continent', value: S.contOf.get(d.iso) || 'Not assigned' },
+    ]);
+    if (ev) placeTip(R.tip, R.box, ev);
+  }
+  function raceUpdate(src) {
+    if (!R.svg || !S.data) return;
+    const yr = R.ctl.value;
+    const top = raceTop(yr);
+    R.current = top;
+    const speed = +R.speedSel.value || 350;
+    const dur = RM.matches || !src ? 0 : src === 'play' ? Math.max(60, speed - 15) : src === 'drag' ? 140 : 600;
+    const t = R.svg.transition('race').duration(dur).ease(src === 'play' ? d3.easeLinear : d3.easeCubicOut);
+    const { x, step, innerW, innerH } = R;
+    x.domain([0, d3.max(top, (d) => d.v) || 1]);
+    const tickN = innerW < 360 ? 3 : 6;
+    const tf = x.tickFormat(tickN);
+    R.gAxis.transition(t).call(d3.axisTop(x).ticks(tickN).tickFormat((v) => tf(v) + '%').tickSize(-innerH).tickSizeOuter(0));
+    R.gAxis.attr('font-size', null).attr('font-family', null);
+    R.wm.text(String(yr));
+    R.sum.text(top.length ? `These ${top.length}: ${d3.format('.1f')(d3.sum(top, (d) => d.v))}% of world CO₂` : 'No figures for this year');
+    const yPos = (rank) => (rank - 1) * step;
+    const offY = innerH + step;
+    const barH = Math.round(step * 0.76), barY = (step - barH) / 2;
+    const sel = R.gBars.selectAll('g.co2-rbar').data(top, (d) => d.iso);
+    const enter = sel.enter().append('g').attr('class', 'co2-rbar').attr('transform', `translate(0,${offY})`).style('opacity', 0);
+    enter.append('rect').attr('x', 0).attr('rx', 3).attr('width', (d) => Math.max(0, x(d.v)));
+    enter.append('text').attr('class', 'co2-rname').attr('x', -8).attr('dy', '0.32em');
+    enter.append('text').attr('class', 'co2-rval').attr('dy', '0.32em').attr('x', (d) => x(d.v) + 6).each(function (d) { this._v = d.v; });
+    enter
+      .on('pointerenter', (ev, d) => { R.hover = d.iso; showRaceTip(ev); })
+      .on('pointermove', (ev) => placeTip(R.tip, R.box, ev))
+      .on('pointerleave', (ev) => { if (ev.pointerType === 'touch') return; R.hover = null; R.tip.hidden = true; })
+      .on('click', (ev, d) => pick(d.iso, 'race'));
+    const all = enter.merge(sel);
+    all.classed('is-picked', (d) => d.iso === S.picked);
+    all.select('rect').attr('y', barY).attr('height', barH).attr('fill', (d) => raceColor(d.iso));
+    all.select('.co2-rname').attr('y', step / 2).text((d) => fitName(d.name));
+    all.select('.co2-rval').attr('y', step / 2);
+    all.transition(t).attr('transform', (d) => `translate(0,${yPos(d.rank)})`).style('opacity', 1);
+    all.select('rect').transition(t).attr('width', (d) => Math.max(0, x(d.v)));
+    all.select('.co2-rval').transition(t).attr('x', (d) => x(d.v) + 6).tween('text', function (d) {
+      const from = this._v == null ? d.v : this._v;
+      const i = d3.interpolateNumber(from, d.v);
+      this._v = d.v;
+      return (k) => { this.textContent = fmtShare(i(k)); };
+    });
+    sel.exit().classed('is-picked', false).transition(t).attr('transform', `translate(0,${offY})`).style('opacity', 0).remove();
+    if (R.hover) showRaceTip();
+  }
+  function drawRaceKey() {
+    const names = S.cont ? S.cont.series.map((s) => s.name) : Object.keys(S.pal.cont);
+    R.key.replaceChildren(...names.map((nm) => {
+      const it = document.createElement('span');
+      it.className = 'co2-leg-item';
+      const sw = document.createElement('span');
+      sw.className = 'co2-sw';
+      sw.style.background = colorOf(nm);
+      it.append(sw, document.createTextNode(nm));
+      return it;
+    }));
+  }
+  function renderRace(state) {
+    if (state !== 'ok') {
+      R.svg = null; R.hover = null; R.tip.hidden = true;
+      R.key.replaceChildren();
+      if (state === 'fail') showFail(R.box);
+      else { clearChart(R.box); R.box.classList.add('dash-skeleton'); }
+      return;
+    }
+    R.box.classList.remove('dash-skeleton');
+    R.box.querySelectorAll(':scope > .co2-fail').forEach((n) => n.remove());
+    if (!R.svg || R.width !== R.box.clientWidth || R.builtVer !== S.dataVer) {
+      if (!buildRace()) return;
+    }
+    if (!R.ctl.playing) raceUpdate(null);
+    drawRaceKey();
+  }
+
+  /* ---------- Highlight one country everywhere ---------- */
+  function pickName(iso) {
+    const r = S.data && S.data.latest.get(iso);
+    if (r) return r.country;
+    const s = S.geo && S.geo.byIso.get(iso);
+    return s ? s.name : iso;
+  }
+  function pick(iso, from) {
+    S.picked = !iso || S.picked === iso ? null : iso;
+    applyPick(from);
+  }
+  function applyPick(from) {
+    const p = S.picked;
+    for (const m of Object.values(maps)) {
+      if (!m.paths) continue;
+      m.paths.classed('is-picked', (d) => d.iso === p);
+      if (p) m.paths.filter((d) => d.iso === p).raise();
+    }
+    if (K.gC) {
+      const c = K.gC.selectAll('circle').classed('is-picked', (d) => d.iso === p);
+      if (p) c.filter((d) => d.iso === p).raise();
+    }
+    if (R.gBars) R.gBars.selectAll('g.co2-rbar').classed('is-picked', (d) => d && d.iso === p);
+    T.tbody.querySelectorAll('tr[data-key]').forEach((tr) => tr.classList.toggle('is-picked', isoOf(tr) === p));
+    T.pill.hidden = !p;
+    T.pill.replaceChildren();
+    if (p) {
+      const sw = document.createElement('span');
+      sw.className = 'co2-sw';
+      T.pill.append(sw, document.createTextNode(`${pickName(p)} highlighted · clear ✕`));
+      if (from && from !== 'table') scrollRowIntoView(p);
+    }
+  }
+
+  /* ---------- Headline marks ---------- */
+  function drawHeadline() {
+    const st = dash.data('headline');
+    const h = st.status === 'ok' && Array.isArray(st.data) ? st.data[0] : null;
+    root.querySelectorAll('[data-source="headline"][data-field]').forEach((el) => {
+      if (h) { el.classList.remove('dash-skeleton'); el.textContent = h[el.dataset.field] == null ? '—' : String(h[el.dataset.field]); }
+      else if (isFail(st.status)) { el.classList.remove('dash-skeleton'); el.textContent = '—'; }
+      else el.classList.add('dash-skeleton');
+    });
+  }
+
+  /* ---------- Jump links ---------- */
+  function go(el) { el.scrollIntoView({ behavior: RM.matches ? 'auto' : 'smooth', block: 'start' }); dash.setLink(el.id); }
+  root.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { const el = $(b.dataset.go); if (el) go(el); }));
+
+  /* ---------- Render everything ---------- */
+  function renderAll() {
+    ensureTheme();
+    const cs = dash.data('country_emissions'), gs = dash.data('country_shapes'), ks = dash.data('continent_emissions');
+    if (cs.status === 'ok' && Array.isArray(cs.data) && cs.data.length && cs.data !== S.raw.c) {
+      S.raw.c = cs.data;
+      S.data = parseCountries(cs.data);
+      S.dataVer++;
+      for (const c of [maps.annual.ctl, maps.pc.ctl, K.ctl, T.ctl, R.ctl]) c.init(S.data.years[0], S.data.years[1]);
+    }
+    const cc = dash.data('country_continents');
+    if (cc.status === 'ok' && Array.isArray(cc.data) && cc.data !== S.raw.cc) {
+      S.raw.cc = cc.data;
+      S.contOf = new Map(cc.data.map((r) => [r.iso_code, r.continent]));
+    }
+    const rk = dash.data('country_ranks');
+    if (rk.status === 'ok' && Array.isArray(rk.data) && rk.data !== S.raw.rk) {
+      S.raw.rk = rk.data;
+      T.ranks = parseRanks(rk.data);
+    }
+    if (gs.status === 'ok' && Array.isArray(gs.data) && gs.data.length && gs.data !== S.raw.g) {
+      S.raw.g = gs.data;
+      S.geo = parseShapes(gs.data);
+      S.geoVer++;
+    }
+    if (ks.status === 'ok' && Array.isArray(ks.data) && ks.data.length && ks.data !== S.raw.k) {
+      S.raw.k = ks.data;
+      S.cont = parseCont(ks.data);
+    }
+    const geoState = combine(cs.status, gs.status) === 'ok' && S.data && S.geo ? 'ok' : combine(cs.status, gs.status) === 'fail' ? 'fail' : 'loading';
+    renderMap(maps.annual, geoState);
+    renderMap(maps.pc, geoState);
+    renderLine(ks.status === 'ok' && S.cont ? 'ok' : ks.status);
+    renderCarto(geoState);
+    const tableState = cs.status === 'ok' && S.data ? 'ok' : cs.status;
+    renderTable(tableState);
+    renderRace(tableState === 'ok' ? 'ok' : isFail(cs.status) ? 'fail' : 'loading');
+    applyPick();
+    drawHeadline();
+    if (!S.jumped && geoState === 'ok') {
+      S.jumped = true;
+      const named = document.getElementById(location.hash.slice(1));
+      if (named && root.contains(named)) requestAnimationFrame(() => named.scrollIntoView());
+    }
+  }
+  dash.onData(renderAll);
+
+  const onTheme = () => requestAnimationFrame(() => { if (detectDark() !== S.dark) renderAll(); });
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if (mq.addEventListener) mq.addEventListener('change', onTheme);
+  new MutationObserver(onTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class', 'style'] });
+  if (document.body) new MutationObserver(onTheme).observe(document.body, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+})();
+</script>
+
+</main>
+<footer class="site-foot">
+  Data: annual CO₂ emissions by country, 1750–2021, from Our World in Data's CO₂ dataset (CC BY 4.0). Country borders: Natural Earth, via world-atlas. Charts built with D3.js.
+</footer>
+</body>
+</html>

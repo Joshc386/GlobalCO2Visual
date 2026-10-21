@@ -22,6 +22,7 @@ In 1900 the top 20 CO2 emitters accounted for 97.6% of the world's total CO2 emi
 | Country rankings | Rank, annual CO₂, share of world, CO₂ per person, 10-year change | Year slider, sort, search, filter out countries under 1 million people |
 | Top 20 over time | Animated bar chart race of each country's share of world CO₂ | Play, speed, year slider; bars coloured by continent |
 | By continent | Annual CO₂ for six continents | Drag a window to pick the year range, toggle continents |
+| By country | Annual CO₂ for countries you choose, starting with the ten largest historical emitters | Search to add, click to remove, log scale, year-range window, hover to bring a line forward |
 | Cartogram | Countries as circles sized by CO₂ (Dorling cartogram) | Single year or all years combined, play, rescale |
 
 Clicking a country on a map, a table row, a circle or a bar highlights it across every chart.

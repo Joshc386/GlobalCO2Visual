@@ -332,6 +332,21 @@ window.dash = (() => {
 .co2-down { color: var(--color-ok); }
 .co2-tablefoot { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
 
+/* Country line chart: search box and removable chips */
+.co2-picker { position: relative; flex: 1 1 14rem; min-width: 0; max-width: 22rem; }
+.co2-picker .co2-search { width: 100%; max-width: none; }
+.co2-search:disabled { opacity: 0.6; }
+.co2-options { position: absolute; z-index: 6; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 18rem; overflow: auto; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); }
+.co2-option { padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: var(--cds-font-size-caption); color: var(--color-fg); }
+.co2-option[aria-selected="true"], .co2-option:hover { background: var(--co2-accent-soft); }
+.co2-option.is-empty { cursor: default; color: var(--color-fg-muted); background: transparent; }
+.co2-chip-x .co2-x { margin-left: 2px; font-size: 1.1em; line-height: 1; color: var(--color-fg-muted); }
+.co2-chip-x:hover { border-color: var(--co2-accent); }
+.co2-chip-x:hover .co2-x { color: var(--color-fg); }
+.co2-status { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.co2-status:empty { display: none; }
+.co2-svg .co2-empty { fill: var(--color-fg-muted); font-size: var(--cds-font-size-body); }
+
 /* Top-20 bar chart race */
 .co2-race { min-height: 420px; }
 .co2-race .co2-axis line { stroke: var(--cds-chart-grid); }
@@ -392,6 +407,7 @@ window.dash = (() => {
       <button type="button" data-go="country-table">Country rankings</button>
       <button type="button" data-go="top-20">Top 20 over time</button>
       <button type="button" data-go="continents">By continent</button>
+      <button type="button" data-go="countries-trend">By country</button>
       <button type="button" data-go="cartogram">Cartogram</button>
     </nav>
   </header>
@@ -473,6 +489,32 @@ window.dash = (() => {
     </div>
   </section>
 
+  <section class="co2-card" id="countries-trend" aria-labelledby="countries-trend-title">
+    <div>
+      <h2 class="co2-h2" id="countries-trend-title">Annual emissions by country</h2>
+      <p class="co2-note">Starts with the ten countries that have emitted the most CO₂ in total. Search to add a country, click a name to remove it, and drag the window in the strip under the chart to choose the years. Hover near a line to bring it forward, and click to highlight that country across the dashboard.</p>
+    </div>
+    <div class="co2-toolbar">
+      <div class="co2-filters">
+        <div class="co2-picker">
+          <input type="search" class="co2-search" id="ctry-search" placeholder="Add a country…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="ctry-options" aria-autocomplete="list" aria-label="Add a country to the chart" disabled>
+          <ul class="co2-options" id="ctry-options" role="listbox" aria-label="Matching countries" hidden></ul>
+        </div>
+        <button type="button" class="co2-chip co2-pickpill" id="ctry-addpick" hidden></button>
+        <button type="button" class="co2-chip" id="ctry-reset">Reset to top 10</button>
+        <button type="button" class="co2-chip" id="ctry-clear">Clear all</button>
+      </div>
+      <label class="co2-check" for="ctry-log"><input type="checkbox" id="ctry-log"> Log scale</label>
+    </div>
+    <div class="co2-chips" id="ctry-chips" data-source="top_cumulative country_emissions"></div>
+    <p class="co2-status" id="ctry-status" role="status"></p>
+    <div class="co2-chart co2-line dash-skeleton" id="ctry-chart" data-source="country_emissions"></div>
+    <div class="co2-rangebar">
+      <div class="co2-chips" id="ctry-presets" aria-label="Year range presets"></div>
+      <output class="co2-rangeout" id="ctry-range" data-source="country_emissions">—</output>
+    </div>
+  </section>
+
   <section class="co2-card" id="cartogram" aria-labelledby="cartogram-title">
     <div>
       <h2 class="co2-h2" id="cartogram-title">Emissions cartogram</h2>
@@ -527,6 +569,26 @@ dash.calc('headline', {
       top_pc_country: perHead.country,
       top_pc_t: Math.round(n(perHead.co2_per_capita) * 10) / 10,
     }];
+  },
+});
+
+/* ---------- Country line chart: the ten largest emitters over all years ---------- */
+dash.calc('top_cumulative', {
+  inputs: ['country_emissions'],
+  title: 'Top 10 historical emitters',
+  description: "The ten countries with the most CO₂ emitted in total, using each country's cumulative CO₂ in its latest year.",
+  fn: (country_emissions) => {
+    const n = (v) => (v === '' || v == null || !isFinite(+v) ? null : +v);
+    const latest = new Map();
+    for (const r of country_emissions) {
+      const p = latest.get(r.iso_code);
+      if (!p || +r.year > +p.year) latest.set(r.iso_code, r);
+    }
+    return [...latest.values()]
+      .filter((r) => n(r.cumulative_co2) != null)
+      .sort((a, b) => n(b.cumulative_co2) - n(a.cumulative_co2))
+      .slice(0, 10)
+      .map((r, i) => ({ rank: i + 1, iso_code: r.iso_code, country: r.country, cumulative_co2: n(r.cumulative_co2) }));
   },
 });
 
@@ -703,8 +765,19 @@ dash.calc('country_ranks', {
       if (!p || r.year > p.year) latest.set(r.iso, r);
     }
     const pcs = rows.map((r) => r.pc).filter((v) => v != null && v > 0).sort(d3.ascending);
+    const series = new Map();
+    for (const r of rows) {
+      let s = series.get(r.iso);
+      if (!s) series.set(r.iso, (s = { key: r.iso, name: r.country, values: [], byYear: new Map() }));
+      if (r.co2 != null) { s.values.push({ year: r.year, v: r.co2 }); s.byYear.set(r.year, r.co2); }
+    }
+    for (const s of series.values()) {
+      s.values.sort((a, b) => a.year - b.year);
+      const l = latest.get(s.key);
+      if (l) s.name = l.country;
+    }
     return {
-      rows, byYear, latest,
+      rows, byYear, latest, series,
       years: d3.extent(rows, (r) => r.year),
       maxCo2: d3.max(rows, (r) => r.co2) || 1,
       pcHi: (d3.quantileSorted ? d3.quantileSorted(pcs, 0.995) : d3.quantile(pcs, 0.995)) || 1,
@@ -720,7 +793,7 @@ dash.calc('country_ranks', {
     const years = d3.extent(rows, (r) => r.year);
     const series = [...d3.group(rows, (r) => r.name)].map(([name, rs]) => {
       rs.sort((a, b) => a.year - b.year);
-      return { name, values: rs, byYear: new Map(rs.map((r) => [r.year, r.v])) };
+      return { key: name, name, values: rs, byYear: new Map(rs.map((r) => [r.year, r.v])) };
     });
     series.sort((a, b) => (b.byYear.get(years[1]) ?? 0) - (a.byYear.get(years[1]) ?? 0));
     const total = [];
@@ -1032,29 +1105,9 @@ dash.calc('country_ranks', {
     else { clearChart(m.box); m.box.classList.add('dash-skeleton'); }
   }
 
-  /* ---------- Continent line chart with year-range strip ---------- */
-  const L = { box: $('cont-chart'), chips: $('cont-legend'), presets: $('cont-presets'), out: $('cont-range'), range: null, hidden: new Set(), hoverYear: null };
-  L.tip = makeTip(L.box);
-  function buildChips() {
-    L.chips.replaceChildren(...S.cont.series.map((s) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'co2-chip';
-      b.setAttribute('aria-pressed', String(!L.hidden.has(s.name)));
-      const sw = document.createElement('span');
-      sw.className = 'co2-sw';
-      sw.style.background = colorOf(s.name);
-      b.append(sw, document.createTextNode(s.name));
-      b.addEventListener('click', () => {
-        if (L.hidden.has(s.name)) L.hidden.delete(s.name); else L.hidden.add(s.name);
-        b.setAttribute('aria-pressed', String(!L.hidden.has(s.name)));
-        if (L.update) L.update();
-      });
-      return b;
-    }));
-  }
-  function buildPresets() {
-    const [y0, y1] = S.cont.years;
+  /* ---------- Line charts with a year-range strip (shared by continents and countries) ---------- */
+  function trendPresets(L, years) {
+    const [y0, y1] = years;
     const opts = [['All years', y0]];
     for (const v of [1850, 1950, 1990]) if (v > y0 && v < y1) opts.push([`Since ${v}`, v]);
     L.presets.replaceChildren(...opts.map(([label, from]) => {
@@ -1067,25 +1120,26 @@ dash.calc('country_ranks', {
       return b;
     }));
   }
-  function syncPresets() {
+  function trendSyncPresets(L, years) {
     const [a, b] = L.range;
-    L.presets.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(+btn.dataset.from === a && b === S.cont.years[1])));
+    L.presets.querySelectorAll('button').forEach((btn) => btn.setAttribute('aria-pressed', String(+btn.dataset.from === a && b === years[1])));
   }
-  function drawLine() {
-    const box = L.box, C = S.cont;
+  // cfg: { series, visible(), color(series), years, total, aria, log, noneText, emptyText, onPick(key) }
+  function drawTrend(L, cfg) {
+    const box = L.box;
     box.classList.remove('dash-skeleton');
     clearChart(box);
+    L.apply = null; L.update = null; L.emphasize = null;
     const width = box.clientWidth;
     if (!width) return;
     const narrow = width < 640;
-    const [y0, y1] = C.years;
+    const [y0, y1] = cfg.years;
     if (!L.range) L.range = [y0, y1];
     L.range = [Math.max(y0, L.range[0]), Math.min(y1, L.range[1])];
-    buildChips();
-    buildPresets();
+    if (L.range[1] - L.range[0] < 2) L.range = [y0, y1];
+    trendPresets(L, cfg.years);
 
-    const svgSel = d3.select(box).insert('svg', '.co2-tip').attr('class', 'co2-svg').attr('width', '100%')
-      .attr('role', 'img').attr('aria-label', 'Line chart of annual CO₂ emissions by continent');
+    const svgSel = d3.select(box).insert('svg', '.co2-tip').attr('class', 'co2-svg').attr('width', '100%').attr('role', 'img').attr('aria-label', cfg.aria);
     const measure = (str, cls) => {
       const t = svgSel.append('text').text(str);
       if (cls) t.attr('class', cls);
@@ -1093,10 +1147,18 @@ dash.calc('country_ranks', {
       t.remove();
       return w;
     };
-    const ml = Math.ceil(Math.max(measure('0.000'), measure('20.0'))) + 12;
+    const ml = Math.ceil(Math.max(measure('0.000'), measure('20.0'), measure('10k'))) + 12;
+    const labelGap = (() => {
+      const t = svgSel.append('text').attr('class', 'co2-endname').text('Hg');
+      const h = t.node().getBBox().height;
+      t.remove();
+      return Math.max(14, Math.ceil(h) + 2);
+    })();
     const endLabels = !narrow;
-    const mr = endLabels ? Math.ceil(d3.max(C.series, (s) => measure(s.name, 'co2-endname') + 8 + measure(fmtSmart(d3.max(s.values, (r) => r.v))))) + 20 : 14;
-    const mt = 26, H1 = narrow ? 230 : 300, gapMid = 44, H2 = narrow ? 44 : 52, mb = 24;
+    const mr = endLabels && cfg.series.length
+      ? Math.ceil(d3.max(cfg.series, (s) => measure(s.name, 'co2-endname') + 8 + measure(fmtSmart(d3.max(s.values, (r) => r.v))))) + 20
+      : 14;
+    const mt = 26, H1 = narrow ? 240 : 320, gapMid = 54, H2 = narrow ? 44 : 52, mb = 24;
     const innerW = Math.max(80, width - ml - mr);
     const totalH = mt + H1 + gapMid + H2 + mb;
     svgSel.attr('viewBox', `0 0 ${width} ${totalH}`).attr('height', totalH);
@@ -1108,6 +1170,7 @@ dash.calc('country_ranks', {
     const gY = gF.append('g').attr('class', 'co2-axis');
     const gX = gF.append('g').attr('class', 'co2-axis').attr('transform', `translate(0,${H1})`);
     const unitT = gF.append('text').attr('class', 'co2-unit').attr('x', -ml + 2).attr('y', -12);
+    const emptyT = gF.append('text').attr('class', 'co2-empty').attr('x', innerW / 2).attr('y', H1 / 2).attr('text-anchor', 'middle');
     const gLines = gF.append('g').attr('clip-path', `url(#${clipId})`);
     const gEnd = gF.append('g');
     const gHover = gF.append('g').style('display', 'none');
@@ -1115,23 +1178,40 @@ dash.calc('country_ranks', {
     const gDots = gHover.append('g');
     const overlay = gF.append('rect').attr('width', innerW).attr('height', H1).attr('fill', 'transparent').style('cursor', 'crosshair');
     const x = d3.scaleLinear().range([0, innerW]);
-    const y = d3.scaleLinear().range([H1, 0]);
+    let y = d3.scaleLinear().range([H1, 0]);
     let div = 1000;
-    const visible = () => C.series.filter((s) => !L.hidden.has(s.name));
+    const visible = cfg.visible;
+    const color = cfg.color;
+    const usable = (v) => v != null && (!cfg.log || v > 0);
+    const yClamp = (v) => Math.max(0, Math.min(H1, y(v / div)));
 
-    function showHover(yr, ev) {
+    function applyEmph() {
+      const e = L.emph;
+      gLines.selectAll('path').attr('opacity', (s) => (e && s.key !== e ? 0.18 : 1)).attr('stroke-width', (s) => (e && s.key === e ? 3 : 2));
+      gEnd.selectAll('g').attr('opacity', (d) => (e && d.s.key !== e ? 0.3 : 1));
+      if (e) gLines.selectAll('path').filter((s) => s.key === e).raise();
+    }
+    function showHover(yr, ev, py) {
       const [a, b] = L.range;
       yr = Math.max(a, Math.min(b, yr));
       L.hoverYear = yr;
       gHover.style('display', null);
       rule.attr('x1', x(yr)).attr('x2', x(yr));
-      const vis = visible().map((s) => ({ s, v: s.byYear.get(yr) })).filter((d) => d.v != null);
-      gDots.selectAll('circle').data(vis, (d) => d.s.name).join('circle').attr('class', 'co2-hdot').attr('r', 4)
-        .attr('cx', x(yr)).attr('cy', (d) => y(d.v / div)).attr('fill', (d) => colorOf(d.s.name));
+      const vis = visible().map((s) => ({ s, v: s.byYear.get(yr) })).filter((d) => usable(d.v));
+      if (py != null && !L.chipEmph) {
+        let best = null, bd = 22;
+        for (const d of vis) {
+          const dy = Math.abs(y(d.v / div) - py);
+          if (dy < bd) { bd = dy; best = d.s.key; }
+        }
+        if (best !== L.emph) { L.emph = best; applyEmph(); }
+      }
+      gDots.selectAll('circle').data(vis, (d) => d.s.key).join('circle').attr('class', 'co2-hdot').attr('r', 4)
+        .attr('cx', x(yr)).attr('cy', (d) => yClamp(d.v)).attr('fill', (d) => color(d.s));
       const sorted = vis.slice().sort((p, q) => q.v - p.v);
-      const lines = sorted.map((d) => ({ label: d.s.name, value: fmtSmart(d.v), color: colorOf(d.s.name) }));
+      const lines = sorted.map((d) => ({ label: d.s.name, value: fmtSmart(d.v), color: color(d.s), strong: d.s.key === L.emph }));
       if (sorted.length > 1) lines.push({ label: 'Total shown', value: fmtSmart(d3.sum(sorted, (d) => d.v)), strong: true });
-      if (!lines.length) lines.push({ label: 'No continent selected', value: '' });
+      if (!lines.length) lines.push({ label: cfg.noneText, value: '' });
       fillTip(L.tip, String(yr), lines);
       if (ev) placeTip(L.tip, box, ev);
     }
@@ -1139,41 +1219,59 @@ dash.calc('country_ranks', {
       L.hoverYear = null;
       gHover.style('display', 'none');
       L.tip.hidden = true;
+      if (!L.chipEmph && L.emph) { L.emph = null; applyEmph(); }
     }
     function updateFocus() {
       const [a, b] = L.range;
       x.domain([a, b]);
       const vis = visible();
-      let mx = 0;
-      for (const s of vis) for (const r of s.values) if (r.year >= a && r.year <= b && r.v != null && r.v > mx) mx = r.v;
-      const unit = mx >= 1000 ? 'Gt' : 'Mt';
-      div = unit === 'Gt' ? 1000 : 1;
-      y.domain([0, (mx / div) * 1.06 || 1]).nice(5);
-      const yt = y.ticks(5), yf = y.tickFormat(5);
+      let mx = 0, mn = Infinity;
+      for (const s of vis) for (const r of s.values) {
+        if (r.year < a || r.year > b || r.v == null) continue;
+        if (r.v > mx) mx = r.v;
+        if (r.v > 0 && r.v < mn) mn = r.v;
+      }
+      let yt, yf;
+      if (cfg.log && mx > 0) {
+        div = 1;
+        const hi = mx * 1.3;
+        const lo = Math.max(10 ** Math.floor(Math.log10(mn)), 10 ** (Math.floor(Math.log10(hi)) - 6));
+        y = d3.scaleLog().domain([lo, hi > lo ? hi : lo * 10]).range([H1, 0]);
+        yt = y.ticks().filter((v) => Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-9);
+        yf = tickLabel;
+        unitT.text('Million tonnes (Mt) CO₂ per year, log scale');
+      } else {
+        const unit = mx >= 1000 ? 'Gt' : 'Mt';
+        div = unit === 'Gt' ? 1000 : 1;
+        y = d3.scaleLinear().domain([0, (mx / div) * 1.06 || 1]).range([H1, 0]).nice(5);
+        yt = y.ticks(5);
+        yf = y.tickFormat(5);
+        unitT.text(unit === 'Gt' ? 'Billion tonnes (Gt) CO₂ per year' : 'Million tonnes (Mt) CO₂ per year');
+      }
+      emptyT.text(vis.length ? '' : cfg.emptyText);
       gGrid.selectAll('line').data(yt).join('line').attr('x1', 0).attr('x2', innerW).attr('y1', (d) => y(d)).attr('y2', (d) => y(d));
       gY.selectAll('text').data(yt).join('text').attr('x', -8).attr('y', (d) => y(d)).attr('dy', '0.32em').attr('text-anchor', 'end').text((d) => yf(d));
-      unitT.text(unit === 'Gt' ? 'Billion tonnes (Gt) CO₂ per year' : 'Million tonnes (Mt) CO₂ per year');
       const xt = x.ticks(narrow ? 4 : 8).filter(Number.isInteger);
-      gX.call(d3.axisBottom(x).tickValues(xt).tickFormat(d3.format('d')).tickSizeOuter(0).tickSize(4)).attr('font-size', null).attr('font-family', null);
-      const line = d3.line().defined((r) => r.v != null).x((r) => x(r.year)).y((r) => y(r.v / div));
-      gLines.selectAll('path').data(vis, (s) => s.name).join('path').attr('fill', 'none').attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
-        .attr('stroke', (s) => colorOf(s.name)).attr('d', (s) => line(s.values));
+      gX.call(d3.axisBottom(x).tickValues(xt).tickFormat(d3.format('d')).tickSizeOuter(0).tickSize(4).tickPadding(8)).attr('font-size', null).attr('font-family', null);
+      const line = d3.line().defined((r) => usable(r.v)).x((r) => x(r.year)).y((r) => y(r.v / div));
+      gLines.selectAll('path').data(vis, (s) => s.key).join('path').attr('fill', 'none').attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
+        .attr('stroke', (s) => color(s)).attr('d', (s) => line(s.values));
       if (endLabels) {
-        const items = vis.map((s) => ({ s, v: s.byYear.get(b) })).filter((d) => d.v != null).map((d) => ({ ...d, y0: y(d.v / div), ly: y(d.v / div) }));
+        const items = vis.map((s) => ({ s, v: s.byYear.get(b) })).filter((d) => usable(d.v)).map((d) => ({ ...d, y0: yClamp(d.v), ly: yClamp(d.v) }));
         items.sort((p, q) => p.y0 - q.y0);
-        const gap = 15;
+        const gap = labelGap;
         for (let i = 1; i < items.length; i++) if (items[i].ly < items[i - 1].ly + gap) items[i].ly = items[i - 1].ly + gap;
         for (let i = items.length - 1; i >= 0; i--) {
-          const lim = i === items.length - 1 ? H1 : items[i + 1].ly - gap;
+          const lim = i === items.length - 1 ? H1 + gap / 2 : items[i + 1].ly - gap;
           if (items[i].ly > lim) items[i].ly = lim;
         }
-        const g = gEnd.selectAll('g').data(items, (d) => d.s.name).join((enter) => {
+        const g = gEnd.selectAll('g').data(items, (d) => d.s.key).join((enter) => {
           const e = enter.append('g');
           e.append('circle').attr('r', 3);
           e.append('text');
           return e;
         });
-        g.select('circle').attr('cx', innerW).attr('cy', (d) => d.y0).attr('fill', (d) => colorOf(d.s.name));
+        g.select('circle').attr('cx', innerW).attr('cy', (d) => d.y0).attr('fill', (d) => color(d.s));
         g.select('text').attr('x', innerW + 8).attr('y', (d) => d.ly).attr('dy', '0.32em').each(function (d) {
           const t = d3.select(this);
           t.selectAll('tspan').remove();
@@ -1181,25 +1279,28 @@ dash.calc('country_ranks', {
           t.append('tspan').attr('dx', 8).text(fmtSmart(d.v));
         });
       } else gEnd.selectAll('*').remove();
+      applyEmph();
       L.out.replaceChildren();
       const bA = document.createElement('b'); bA.textContent = String(a);
       const bB = document.createElement('b'); bB.textContent = String(b);
       L.out.append('Showing ', bA, ' to ', bB);
-      syncPresets();
+      trendSyncPresets(L, cfg.years);
       if (L.hoverYear != null) showHover(L.hoverYear);
     }
     overlay.on('pointerenter pointermove', (ev) => {
-      const [px] = d3.pointer(ev, overlay.node());
-      showHover(Math.round(x.invert(px)), ev);
-    }).on('pointerleave', (ev) => { if (ev.pointerType !== 'touch') hideHover(); });
+      const [px, py] = d3.pointer(ev, overlay.node());
+      showHover(Math.round(x.invert(px)), ev, py);
+    }).on('pointerleave', (ev) => { if (ev.pointerType !== 'touch') hideHover(); })
+      .on('click', () => { if (cfg.onPick && L.emph) cfg.onPick(L.emph); });
+    if (cfg.onPick) overlay.style('cursor', 'pointer');
 
     // Year-range strip
     const gC = svgSel.append('g').attr('transform', `translate(${ml},${mt + H1 + gapMid})`);
     const x2 = d3.scaleLinear([y0, y1], [0, innerW]);
-    const y2 = d3.scaleLinear([0, d3.max(C.total, (d) => d.v) || 1], [H2, 0]);
+    const y2 = d3.scaleLinear([0, d3.max(cfg.total, (d) => d.v) || 1], [H2, 0]);
     gC.append('text').attr('x', 0).attr('y', -8).text('Year range');
     gC.append('rect').attr('class', 'co2-ctx-bg').attr('width', innerW).attr('height', H2).attr('rx', 4);
-    gC.append('path').attr('class', 'co2-ctx-area').attr('d', d3.area().x((d) => x2(d.year)).y0(H2).y1((d) => y2(d.v))(C.total));
+    gC.append('path').attr('class', 'co2-ctx-area').attr('d', d3.area().x((d) => x2(d.year)).y0(H2).y1((d) => y2(d.v))(cfg.total));
     gC.append('g').attr('class', 'co2-axis').attr('transform', `translate(0,${H2})`)
       .call(d3.axisBottom(x2).tickValues(x2.ticks(narrow ? 4 : 10).filter(Number.isInteger)).tickFormat(d3.format('d')).tickSizeOuter(0).tickSize(4))
       .attr('font-size', null).attr('font-family', null);
@@ -1236,11 +1337,52 @@ dash.calc('country_ranks', {
     gB.call(brush.move, [x2(L.range[0]), x2(L.range[1])]);
     L.apply = (a, b) => { L.range = [a, b]; gB.call(brush.move, [x2(a), x2(b)]); updateFocus(); };
     L.update = updateFocus;
+    L.emphasize = (key) => { L.emph = key; applyEmph(); if (L.hoverYear != null) showHover(L.hoverYear); };
     updateFocus();
+  }
+  function chipHover(L, b, key) {
+    b.addEventListener('pointerenter', () => { L.chipEmph = true; if (L.emphasize) L.emphasize(key); });
+    b.addEventListener('pointerleave', () => { L.chipEmph = false; if (L.emphasize) L.emphasize(null); });
+  }
+
+  /* ---------- Continent line chart ---------- */
+  const L = { box: $('cont-chart'), chips: $('cont-legend'), presets: $('cont-presets'), out: $('cont-range'), range: null, hidden: new Set(), hoverYear: null, emph: null };
+  L.tip = makeTip(L.box);
+  function buildChips() {
+    L.chips.replaceChildren(...S.cont.series.map((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'co2-chip';
+      b.setAttribute('aria-pressed', String(!L.hidden.has(s.key)));
+      const sw = document.createElement('span');
+      sw.className = 'co2-sw';
+      sw.style.background = colorOf(s.name);
+      b.append(sw, document.createTextNode(s.name));
+      b.addEventListener('click', () => {
+        if (L.hidden.has(s.key)) L.hidden.delete(s.key); else L.hidden.add(s.key);
+        b.setAttribute('aria-pressed', String(!L.hidden.has(s.key)));
+        if (L.update) L.update();
+      });
+      chipHover(L, b, s.key);
+      return b;
+    }));
+  }
+  function drawLine() {
+    buildChips();
+    drawTrend(L, {
+      series: S.cont.series,
+      visible: () => S.cont.series.filter((s) => !L.hidden.has(s.key)),
+      color: (s) => colorOf(s.name),
+      years: S.cont.years,
+      total: S.cont.total,
+      aria: 'Line chart of annual CO₂ emissions by continent',
+      noneText: 'No continent selected',
+      emptyText: 'Every continent is hidden. Click one above to show it.',
+    });
   }
   function renderLine(status) {
     if (status === 'ok' && S.cont) { drawLine(); return; }
-    L.apply = null; L.update = null;
+    L.apply = null; L.update = null; L.emphasize = null;
     L.chips.replaceChildren();
     L.presets.replaceChildren();
     L.out.textContent = '—';
@@ -1248,6 +1390,201 @@ dash.calc('country_ranks', {
     if (isFail(status)) showFail(L.box);
     else { clearChart(L.box); L.box.classList.add('dash-skeleton'); }
   }
+
+  /* ---------- Country line chart: pick your own countries ---------- */
+  const CPAL = {
+    light: ['#1f5fbf', '#0b2a63', '#3d9be0', '#138a9a', '#6a6fd8', '#64748b', '#0f4c5c', '#8b5cf6', '#312e81', '#56b6c2', '#94a3b8', '#4338ca'],
+    dark: ['#5b93f0', '#b6d1fa', '#62c1f5', '#3ccad6', '#a4a7f5', '#9aa9c2', '#2aa4b8', '#b794f6', '#8186e8', '#8fe0ea', '#cbd5e1', '#7c83f2'],
+  };
+  const CMAX = 12;
+  const CL = { box: $('ctry-chart'), chips: $('ctry-chips'), presets: $('ctry-presets'), out: $('ctry-range'), range: null, hoverYear: null, emph: null, sel: null, slot: new Map(), log: false, all: null, allVer: -1 };
+  CL.tip = makeTip(CL.box);
+  const cInput = $('ctry-search'), cList = $('ctry-options'), cStatus = $('ctry-status');
+  const cReset = $('ctry-reset'), cClear = $('ctry-clear'), cAddPick = $('ctry-addpick'), cLog = $('ctry-log');
+  const ctryColor = (iso) => (S.dark ? CPAL.dark : CPAL.light)[(CL.slot.get(iso) ?? 0) % CPAL.light.length];
+  const ctrySeries = () => (CL.sel || []).map((iso) => S.data && S.data.series.get(iso)).filter(Boolean);
+  function topTen() {
+    const t = dash.data('top_cumulative');
+    return t.status === 'ok' && Array.isArray(t.data) ? t.data.map((r) => r.iso_code) : null;
+  }
+  function setSel(list) {
+    CL.sel = list.slice(0, CMAX);
+    CL.slot = new Map(CL.sel.map((iso, i) => [iso, i]));
+    CL.emph = null; CL.chipEmph = false;
+    redrawCountries();
+  }
+  function addCountry(iso) {
+    if (!CL.sel || CL.sel.includes(iso)) return;
+    if (CL.sel.length >= CMAX) { cStatus.textContent = `You can compare up to ${CMAX} countries at once. Remove one to add another.`; return; }
+    const used = new Set(CL.slot.values());
+    let k = 0;
+    while (used.has(k)) k++;
+    CL.sel.push(iso);
+    CL.slot.set(iso, k);
+    cStatus.textContent = '';
+    redrawCountries();
+  }
+  function removeCountry(iso) {
+    if (!CL.sel) return;
+    CL.sel = CL.sel.filter((c) => c !== iso);
+    CL.slot.delete(iso);
+    if (CL.emph === iso) CL.emph = null;
+    CL.chipEmph = false;
+    cStatus.textContent = '';
+    redrawCountries();
+  }
+  function buildCtryChips() {
+    CL.chips.replaceChildren(...ctrySeries().map((s) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'co2-chip co2-chip-x';
+      b.setAttribute('aria-label', `Remove ${s.name}`);
+      const sw = document.createElement('span');
+      sw.className = 'co2-sw';
+      sw.style.background = ctryColor(s.key);
+      const xm = document.createElement('span');
+      xm.className = 'co2-x';
+      xm.setAttribute('aria-hidden', 'true');
+      xm.textContent = '×';
+      b.append(sw, document.createTextNode(s.name), xm);
+      b.addEventListener('click', () => removeCountry(s.key));
+      chipHover(CL, b, s.key);
+      return b;
+    }));
+  }
+  function syncAddPick() {
+    const p = S.picked;
+    const show = !!(p && CL.sel && !CL.sel.includes(p) && S.data && S.data.series.has(p));
+    cAddPick.hidden = !show;
+    cAddPick.textContent = show ? `Add ${pickName(p)}` : '';
+  }
+  function drawCountries() {
+    const series = ctrySeries();
+    const [y0, y1] = S.data.years;
+    const total = [];
+    for (let yr = y0; yr <= y1; yr++) {
+      let s = 0, any = false;
+      for (const se of series) { const v = se.byYear.get(yr); if (v != null) { s += v; any = true; } }
+      if (any) total.push({ year: yr, v: s });
+    }
+    drawTrend(CL, {
+      series,
+      visible: () => series,
+      color: (s) => ctryColor(s.key),
+      years: S.data.years,
+      total,
+      log: CL.log,
+      aria: 'Line chart of annual CO₂ emissions for the chosen countries',
+      noneText: 'No countries chosen',
+      emptyText: 'Search above to add a country, or reset to the top 10.',
+      onPick: (iso) => pick(iso, 'trend'),
+    });
+  }
+  function redrawCountries() {
+    if (!S.data || CL.sel == null) return;
+    buildCtryChips();
+    syncAddPick();
+    drawCountries();
+  }
+  function renderCountryTrend(status) {
+    if (status === 'ok' && S.data) {
+      if (CL.sel == null) {
+        const t = topTen();
+        if (!t) { clearChart(CL.box); CL.box.classList.add('dash-skeleton'); return; }
+        CL.sel = t.slice(0, CMAX);
+        CL.slot = new Map(CL.sel.map((iso, i) => [iso, i]));
+      }
+      cInput.disabled = false;
+      redrawCountries();
+      return;
+    }
+    CL.apply = null; CL.update = null; CL.emphasize = null;
+    CL.chips.replaceChildren();
+    CL.presets.replaceChildren();
+    CL.out.textContent = '—';
+    CL.tip.hidden = true;
+    if (isFail(status)) showFail(CL.box);
+    else { clearChart(CL.box); CL.box.classList.add('dash-skeleton'); }
+  }
+  // Country search box
+  let optItems = [], optActive = -1;
+  function countryIndex() {
+    if (CL.allVer !== S.dataVer) {
+      CL.all = [...S.data.series.values()].filter((s) => s.values.length)
+        .map((s) => ({ iso: s.key, name: s.name, cum: (S.data.latest.get(s.key) || {}).cum || 0 }))
+        .sort((a, b) => b.cum - a.cum);
+      CL.allVer = S.dataVer;
+    }
+    return CL.all;
+  }
+  function closeOptions() {
+    cList.hidden = true;
+    cInput.setAttribute('aria-expanded', 'false');
+    cInput.removeAttribute('aria-activedescendant');
+    optActive = -1;
+  }
+  function markActive() {
+    cList.querySelectorAll('[role="option"]').forEach((li, i) => li.setAttribute('aria-selected', String(i === optActive)));
+    if (optActive >= 0) cInput.setAttribute('aria-activedescendant', 'ctry-opt-' + optActive);
+    else cInput.removeAttribute('aria-activedescendant');
+  }
+  function renderOptions() {
+    if (!S.data || CL.sel == null) { closeOptions(); return; }
+    const q = cInput.value.trim().toLowerCase();
+    const chosen = new Set(CL.sel);
+    let items = countryIndex().filter((c) => !chosen.has(c.iso) && (!q || c.name.toLowerCase().includes(q)));
+    if (q) items = items.slice().sort((a, b) => (b.name.toLowerCase().startsWith(q) - a.name.toLowerCase().startsWith(q)) || b.cum - a.cum);
+    optItems = items.slice(0, 8);
+    optActive = optItems.length ? 0 : -1;
+    if (optItems.length) {
+      cList.replaceChildren(...optItems.map((c, i) => {
+        const li = document.createElement('li');
+        li.id = 'ctry-opt-' + i;
+        li.className = 'co2-option';
+        li.setAttribute('role', 'option');
+        li.textContent = c.name;
+        li.addEventListener('mousedown', (ev) => { ev.preventDefault(); chooseOption(i); });
+        return li;
+      }));
+    } else {
+      const li = document.createElement('li');
+      li.className = 'co2-option is-empty';
+      li.textContent = q ? 'No matching country' : 'Every country is already on the chart';
+      cList.replaceChildren(li);
+    }
+    cList.hidden = false;
+    cInput.setAttribute('aria-expanded', 'true');
+    markActive();
+  }
+  function chooseOption(i) {
+    const c = optItems[i];
+    if (!c) return;
+    addCountry(c.iso);
+    cInput.value = '';
+    closeOptions();
+  }
+  cInput.addEventListener('focus', renderOptions);
+  cInput.addEventListener('input', renderOptions);
+  cInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      if (cList.hidden) renderOptions();
+      else if (optItems.length) { optActive = (optActive + 1) % optItems.length; markActive(); }
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (optItems.length) { optActive = (optActive - 1 + optItems.length) % optItems.length; markActive(); }
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (optActive >= 0) chooseOption(optActive);
+    } else if (ev.key === 'Escape') {
+      closeOptions();
+    }
+  });
+  cInput.addEventListener('blur', () => setTimeout(closeOptions, 120));
+  cReset.addEventListener('click', () => { const t = topTen(); if (t) { cStatus.textContent = ''; setSel(t); } });
+  cClear.addEventListener('click', () => { cStatus.textContent = ''; setSel([]); });
+  cAddPick.addEventListener('click', () => { if (S.picked) addCountry(S.picked); });
+  cLog.addEventListener('change', () => { CL.log = cLog.checked; redrawCountries(); });
 
   /* ---------- Dorling cartogram ---------- */
   const K = { box: $('carto-chart'), legend: $('carto-legend'), mode: 'year', rescale: false, key: null, nodes: new Map(), list: null, hover: null, svg: null, builtGeo: -1 };
@@ -1623,9 +1960,10 @@ dash.calc('country_ranks', {
       .attr('x', -ml).attr('y', -2).attr('width', width).attr('height', innerH + 4);
     const g = svgSel.append('g').attr('transform', `translate(${ml},${mt})`);
     R.gAxis = g.append('g').attr('class', 'co2-axis');
-    R.wm = g.append('text').attr('class', 'co2-watermark').attr('x', innerW).attr('y', innerH - 30)
-      .style('font-size', Math.round(Math.min(96, innerH * 0.2, innerW * 0.2)) + 'px');
-    R.sum = g.append('text').attr('class', 'co2-race-sum').attr('x', innerW).attr('y', innerH - 8);
+    const wmSize = Math.round(Math.min(96, innerH * 0.2, innerW * 0.2));
+    R.wm = g.append('text').attr('class', 'co2-watermark').attr('x', innerW).attr('y', innerH - 26 - Math.round(wmSize * 0.25))
+      .style('font-size', wmSize + 'px');
+    R.sum = g.append('text').attr('class', 'co2-race-sum').attr('x', innerW).attr('y', innerH - 4);
     R.gBars = g.append('g').attr('clip-path', `url(#${clipId})`);
     Object.assign(R, { svg: svgSel, innerW, innerH, step, width, x: d3.scaleLinear().range([0, innerW]), builtVer: S.dataVer });
     return true;
@@ -1739,6 +2077,7 @@ dash.calc('country_ranks', {
     }
     if (R.gBars) R.gBars.selectAll('g.co2-rbar').classed('is-picked', (d) => d && d.iso === p);
     T.tbody.querySelectorAll('tr[data-key]').forEach((tr) => tr.classList.toggle('is-picked', isoOf(tr) === p));
+    syncAddPick();
     T.pill.hidden = !p;
     T.pill.replaceChildren();
     if (p) {
@@ -1797,6 +2136,7 @@ dash.calc('country_ranks', {
     renderMap(maps.annual, geoState);
     renderMap(maps.pc, geoState);
     renderLine(ks.status === 'ok' && S.cont ? 'ok' : ks.status);
+    renderCountryTrend(cs.status === 'ok' && S.data ? 'ok' : cs.status);
     renderCarto(geoState);
     const tableState = cs.status === 'ok' && S.data ? 'ok' : cs.status;
     renderTable(tableState);
